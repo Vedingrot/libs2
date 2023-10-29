@@ -1,3 +1,3 @@
-spec: .gear/s2geometry.spec
+spec: .gear/libs2geometry.spec
 tar: v@version@:.
 copy?: .gear/*.patch
