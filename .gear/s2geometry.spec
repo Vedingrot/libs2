@@ -1,7 +1,6 @@
 %define lname s2geometry
 %define libsover 0
-%define libs2geometry lib%lname%libsover
-Name: %lname
+Name: lib%lname
 Version: 0.10.0
 Release: alt1
 
@@ -29,18 +28,10 @@ This makes it especially suitable for working with geographic data.
 %package devel
 Summary: Development libraries and headers for %lname
 Group: Development/Other
-Provides: %libs2geometry-devel = %EVR
-Obsoletes: %libs2geometry-devel < %EVR
+Requires: %name = %EVR
 
 %description devel
 Development libraries and headers for %lname.
-
-%package -n %libs2geometry
-Summary: %lname library
-Group: System/Libraries
-
-%description -n %libs2geometry
-%lname library.
 
 %prep
 %setup
@@ -58,12 +49,12 @@ sed -i 's/CMAKE_CXX_STANDARD 11/CMAKE_CXX_STANDARD 17/' CMakeLists.txt
 %install
 %cmake_install
 
-%files -n %libs2geometry
+%files
+%_libdir/*.so
 %_libdir/libs2*.so.%libsover
 %_libdir/libs2*.so.%libsover.*
 
 %files devel
-%_libdir/*.so
 %_includedir/s2/
 
 %changelog
