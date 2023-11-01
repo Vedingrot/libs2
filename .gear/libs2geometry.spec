@@ -1,6 +1,5 @@
-%define lname s2geometry
 %define libsover 0
-Name: lib%lname
+Name: libs2geometry
 Version: 0.10.0
 Release: alt1
 
@@ -26,12 +25,12 @@ geometry, i.e., shapes drawn on a sphere rather than on a planar 2D map.
 This makes it especially suitable for working with geographic data.
 
 %package devel
-Summary: Development libraries and headers for %lname
+Summary: Development libraries and headers for %name
 Group: Development/Other
 Requires: %name = %EVR
 
 %description devel
-Development libraries and headers for %lname.
+Development libraries and headers for %name.
 
 %prep
 %setup
