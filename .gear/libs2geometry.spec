@@ -1,4 +1,3 @@
-%define libsover 0
 Name: libs2geometry
 Version: 0.10.0
 Release: alt1
@@ -49,9 +48,7 @@ sed -i 's/CMAKE_CXX_STANDARD 11/CMAKE_CXX_STANDARD 17/' CMakeLists.txt
 %cmake_install
 
 %files
-%_libdir/*.so
-%_libdir/libs2*.so.%libsover
-%_libdir/libs2*.so.%libsover.*
+%_libdir/*.so*
 
 %files devel
 %_includedir/s2/
