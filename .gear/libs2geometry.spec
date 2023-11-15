@@ -1,3 +1,7 @@
+# s2geometry must be configured to use the same C++ version that
+# abseil uses.
+%define cxx_standard 17
+
 Name: libs2geometry
 Version: 0.10.0
 Release: alt1
@@ -32,13 +36,12 @@ Development libraries and headers for %name.
 
 %prep
 %setup
-#Set correct cpp standard
-sed -i 's/CMAKE_CXX_STANDARD 11/CMAKE_CXX_STANDARD 17/' CMakeLists.txt
 
 %build
 %cmake \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DCMAKE_CXX_EXTENSIONS=ON
+    -DCMAKE_CXX_EXTENSIONS=ON \
+    -DCMAKE_CXX_STANDARD=%cxx_standard
 
 %cmake_build
 
