@@ -18,10 +18,11 @@ BuildRequires: libabseil-cpp-devel
 BuildRequires: libssl-devel
 
 %description
-This is a package for manipulating geometric shapes.
-Unlike many geometry libraries, S2 is primarily designed to work with spherical
-geometry, i.e., shapes drawn on a sphere rather than on a planar 2D map.
-This makes it especially suitable for working with geographic data.
+This is a package for manipulating geometric shapes.  Unlike many
+geometry libraries, S2 is primarily designed to work with spherical
+geometry, i.e., shapes drawn on a sphere rather than on a planar
+2D map.  This makes it especially suitable for working with geographic
+data.
 
 %package devel
 Summary: Development libraries and headers for %name
