@@ -22,22 +22,30 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <ostream>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/hash/hash.h"
+#include "absl/numeric/bits.h"
 #include "absl/strings/string_view.h"
 
 #include "s2/base/integral_types.h"
 #include "s2/base/logging.h"
-#include "s2/base/port.h"
-#include "s2/util/bits/bits.h"
-#include "s2/util/coding/coder.h"
+#include "s2/base/integral_types.h"
+#include "s2/base/logging.h"
 #include "s2/_fp_contract_off.h"
 #include "s2/r2.h"
 #include "s2/r2rect.h"
 #include "s2/s1angle.h"
+#include "s2/s2coder.h"
 #include "s2/s2coords.h"
+#include "s2/s2error.h"
+#include "s2/s2point.h"
+#include "s2/s2region.h"
 #include "s2/util/bits/bits.h"
 #include "s2/util/coding/coder.h"
 
@@ -380,6 +388,14 @@ class S2CellId {
   std::string ToToken() const;
   static S2CellId FromToken(absl::string_view token);
 
+  // Legacy coder for S2CellId that delegates to the token representation.
+  // Storage is variable depending on the level of the cell.
+  class Coder : public s2coding::S2Coder<S2CellId> {
+   public:
+    void Encode(Encoder& encoder, const S2CellId& v) const override;
+    bool Decode(Decoder& decoder, S2CellId& v, S2Error& error) const override;
+  };
+
   // Use encoder to generate a serialized representation of this cell id.
   // Can also encode an invalid cell.
   void Encode(Encoder* const encoder) const;
@@ -409,10 +425,10 @@ class S2CellId {
   // neighbors are guaranteed to be distinct.
   void GetEdgeNeighbors(S2CellId neighbors[4]) const;
 
-  // Return the neighbors of closest vertex to this cell at the given level,
-  // by appending them to "output".  Normally there are four neighbors, but
-  // the closest vertex may only have three neighbors if it is one of the 8
-  // cube vertices.
+  // Return the S2CellIds of the neighbors of the closest vertex to this cell
+  // at the given level, by appending them to "output".  Normally there are four
+  // neighbors, but the closest vertex may only have three neighbors if it is
+  // one of the 8 cube vertices.
   //
   // Requires: level < this->level(), so that we can determine which vertex is
   // closest (in particular, level == kMaxLevel is not allowed).
@@ -574,7 +590,7 @@ inline double S2CellId::GetSizeST() const {
 }
 
 inline int S2CellId::GetSizeIJ(int level) {
-  return 1 << (kMaxLevel - level);
+  return uint64{1} << (kMaxLevel - level);
 }
 
 inline double S2CellId::GetSizeST(int level) {
@@ -708,8 +724,14 @@ std::ostream& operator<<(std::ostream& os, S2CellId id);
 // Hasher for S2CellId.
 // Does *not* need to be specified explicitly; this will be used by default for
 // absl::flat_hash_map/set.
+//
+// TODO(b/259279783): Remove rotation once mixing function on 32-bit systems is
+// fixed.
 template <typename H>
 H AbslHashValue(H h, S2CellId id) {
+  if (sizeof(void*) == 4) {
+    return H::combine(std::move(h), id.id(), absl::rotr(id.id(), 32));
+  }
   return H::combine(std::move(h), id.id());
 }
 

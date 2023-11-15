@@ -17,9 +17,15 @@
 
 #include "s2/encoded_uint_vector.h"
 
+#include <cstddef>
+
+#include <algorithm>
+#include <string>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include <gtest/gtest.h>
+#include "s2/util/coding/coder.h"
 
 using std::vector;
 
@@ -125,7 +131,7 @@ TEST(EncodedUintVector, LowerBound) {
 }
 
 TEST(EncodedUintVectorTest, RoundtripEncoding) {
-  std::vector<uint64> values{10, 20, 30, 40};
+  vector<uint64> values{10, 20, 30, 40};
 
   Encoder a_encoder;
   auto a = MakeEncodedVector<uint64>(values, &a_encoder);

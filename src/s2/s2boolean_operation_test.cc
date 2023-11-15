@@ -17,23 +17,25 @@
 
 #include "s2/s2boolean_operation.h"
 
+#include <cmath>
+
 #include <memory>
 #include <string>
-#include <tuple>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "absl/flags/reflection.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/strip.h"
 
+#include "s2/base/commandlineflags_declare.h"
 #include "s2/mutable_s2shape_index.h"
+#include "s2/s1angle.h"
 #include "s2/s2builder.h"
 #include "s2/s2builder_graph.h"
 #include "s2/s2builder_layer.h"
@@ -42,14 +44,24 @@
 #include "s2/s2builderutil_s2polyline_vector_layer.h"
 #include "s2/s2builderutil_snap_functions.h"
 #include "s2/s2builderutil_testing.h"
+#include "s2/s2edge_crossings.h"
+#include "s2/s2error.h"
+#include "s2/s2latlng.h"
 #include "s2/s2lax_polygon_shape.h"
 #include "s2/s2lax_polyline_shape.h"
+#include "s2/s2loop.h"
+#include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
 #include "s2/s2point_vector_shape.h"
+#include "s2/s2pointutil.h"
 #include "s2/s2polygon.h"
 #include "s2/s2polyline.h"
+#include "s2/s2shape.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2shapeutil_contains_brute_force.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
+#include "s2/util/math/matrix3x3.h"
 
 S2_DECLARE_int64(s2shape_index_tmp_memory_budget);
 
@@ -58,15 +70,15 @@ namespace {
 using absl::ByAnyChar;
 using absl::SkipEmpty;
 using absl::StrContains;
-using absl::StrSplit;
-using absl::make_unique;
 using absl::string_view;
+using absl::StrSplit;
 using s2builderutil::IndexMatchingLayer;
 using s2builderutil::LaxPolygonLayer;
 using s2shapeutil::ContainsBruteForce;
+using std::make_unique;
 using std::pair;
-using std::unique_ptr;
 using std::string;
+using std::unique_ptr;
 using std::vector;
 
 using EdgeType = S2Builder::EdgeType;
@@ -1696,7 +1708,7 @@ TEST(S2BooleanOperation, SelfIntersectingPolylines) {
 // Subtracts a degenerate loop along the 180 degree meridian from the given
 // input geometry, and compares the result to "expected_str".  The inputs should
 // be in the format expected by s2textformat::MakeIndexOrDie().
-void TestMeridianSplitting(const char* input_str, const char* expected_str) {
+void TestMeridianSplitting(string_view input_str, string_view expected_str) {
   auto input = s2textformat::MakeIndexOrDie(input_str);
   MutableS2ShapeIndex meridian;
   vector<vector<S2Point>> loops{{S2Point(0, 0, -1), S2Point(-1, 0, 0),

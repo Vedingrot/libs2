@@ -18,19 +18,28 @@
 #include "s2/s2contains_point_query.h"
 
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "s2/base/casts.h"
 #include <gtest/gtest.h>
-#include "absl/memory/memory.h"
 #include "s2/mutable_s2shape_index.h"
+#include "s2/s1angle.h"
 #include "s2/s2cap.h"
 #include "s2/s2loop.h"
+#include "s2/s2point.h"
+#include "s2/s2shape.h"
+#include "s2/s2shapeutil_shape_edge.h"
+#include "s2/s2shapeutil_shape_edge_id.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
 using s2shapeutil::ShapeEdgeId;
 using s2textformat::MakeIndexOrDie;
 using s2textformat::MakePointOrDie;
+using std::make_unique;
+using std::unique_ptr;
 using std::vector;
 
 TEST(S2ContainsPointQuery, VertexModelOpen) {
@@ -110,7 +119,7 @@ TEST(S2ContainsPointQuery, GetContainingShapes) {
   const S2Cap center_cap(S2Testing::RandomPoint(), kMaxLoopRadius);
   MutableS2ShapeIndex index;
   for (int i = 0; i < 100; ++i) {
-    std::unique_ptr<S2Loop> loop = S2Loop::MakeRegularLoop(
+    unique_ptr<S2Loop> loop = S2Loop::MakeRegularLoop(
         S2Testing::SamplePoint(center_cap),
         S2Testing::rnd.RandDouble() * kMaxLoopRadius, kNumVerticesPerLoop);
     index.Add(make_unique<S2Loop::OwningShape>(std::move(loop)));

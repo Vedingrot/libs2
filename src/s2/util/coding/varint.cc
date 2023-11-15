@@ -18,14 +18,10 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "s2/base/integral_types.h"
-
-#ifndef _MSC_VER
-const int Varint::kMax32;
-const int Varint::kMax64;
-const int Varint::kSlopBytes;
-#endif
+#include "s2/base/logging.h"
 
 char* Varint::Encode32(char* sptr, uint32 v) {
   return Encode32Inline(sptr, v);

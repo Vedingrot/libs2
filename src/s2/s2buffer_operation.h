@@ -18,12 +18,19 @@
 #ifndef S2_S2BUFFER_OPERATION_H_
 #define S2_S2BUFFER_OPERATION_H_
 
+#include <memory>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include "s2/s1angle.h"
 #include "s2/s1chord_angle.h"
 #include "s2/s2builder.h"
+#include "s2/s2error.h"
+#include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
 #include "s2/s2point_span.h"
+#include "s2/s2shape.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2winding_operation.h"
 
 // This class provides a way to expand an arbitrary collection of geometry by
@@ -215,9 +222,11 @@ class S2BufferOperation {
   // Default constructor; requires Init() to be called.
   S2BufferOperation();
 
+#ifndef SWIG
   // Convenience constructor that calls Init().
   explicit S2BufferOperation(std::unique_ptr<S2Builder::Layer> result_layer,
                              const Options& options = Options{});
+#endif
 
   // Starts a buffer operation that sends the output polygon to the given
   // S2Builder layer.  This method may be called more than once.

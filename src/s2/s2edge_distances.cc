@@ -17,12 +17,16 @@
 
 #include "s2/s2edge_distances.h"
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <utility>
 
-#include "s2/base/logging.h"
+#include "absl/base/optimization.h"
+#include "s2/s1angle.h"
 #include "s2/s1chord_angle.h"
 #include "s2/s2edge_crossings.h"
+#include "s2/s2point.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2predicates.h"
 
@@ -282,8 +286,8 @@ S2Point Project(const S2Point& x, const S2Point& a, const S2Point& b,
   S2_DCHECK(S2::IsUnitLength(b));
   S2_DCHECK(S2::IsUnitLength(x));
 
-  // TODO(ericv): When X is nearly perpendicular to the plane containing AB,
-  // the result is guaranteed to be close to the edge AB but may be far from
+  // TODO(b/266451020): When X is nearly perpendicular to the plane containing
+  // AB, the result is guaranteed to be close to the edge AB but may be far from
   // the true projected result.  This could be fixed by computing the product
   // (A x B) x X x (A x B) using methods similar to S2::RobustCrossProd() and
   // S2::GetIntersection().  However note that the error tolerance would need
@@ -389,8 +393,8 @@ std::pair<S2Point, S2Point> GetEdgePairClosestPoints(
     case A1: return std::make_pair(a1, Project(a1, b0, b1));
     case B0: return std::make_pair(Project(b0, a0, a1), b0);
     case B1: return std::make_pair(Project(b1, a0, a1), b1);
-    default: S2_LOG(FATAL) << "Unreached (to suppress Android compiler warning)";
   }
+  ABSL_UNREACHABLE();
 }
 
 // TODO(ericv): Optimize this function to use S1ChordAngle rather than S1Angle.

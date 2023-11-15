@@ -19,21 +19,32 @@
 
 #include <iostream>
 #include <memory>
+#include <ostream>
+#include <string>
+
 #include <gtest/gtest.h>
-#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "s2/mutable_s2shape_index.h"
+#include "s2/s1angle.h"
+#include "s2/s1chord_angle.h"
+#include "s2/s2boolean_operation.h"
 #include "s2/s2cap.h"
+#include "s2/s2cell.h"
+#include "s2/s2cell_id.h"
 #include "s2/s2cell_union.h"
+#include "s2/s2closest_edge_query.h"
+#include "s2/s2point.h"
 #include "s2/s2polygon.h"
 #include "s2/s2region_coverer.h"
-#include "s2/s2shape_index.h"
+#include "s2/s2shape.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
+using absl::string_view;
 using s2textformat::MakeIndexOrDie;
 using s2textformat::MakePointOrDie;
 using std::cout;
+using std::make_unique;
 using std::string;
 
 TEST(S2ShapeIndexBufferedRegion, EmptyIndex) {
@@ -41,6 +52,18 @@ TEST(S2ShapeIndexBufferedRegion, EmptyIndex) {
   MutableS2ShapeIndex index;
   S1ChordAngle radius(S1Angle::Degrees(2));
   S2ShapeIndexBufferedRegion region(&index, radius);
+  S2RegionCoverer coverer;
+  S2CellUnion covering = coverer.GetCovering(region);
+  EXPECT_TRUE(covering.empty());
+}
+
+TEST(S2ShapeIndexBufferedRegion, InitEmptyIndex) {
+  // As above, but with Init().  This is mainly to prevent Init() from being
+  // detected as dead code.
+  MutableS2ShapeIndex index;
+  S1ChordAngle radius(S1Angle::Degrees(2));
+  S2ShapeIndexBufferedRegion region;
+  region.Init(&index, radius);
   S2RegionCoverer coverer;
   S2CellUnion covering = coverer.GetCovering(region);
   EXPECT_TRUE(covering.empty());
@@ -107,7 +130,7 @@ TEST(S2ShapeIndexBufferedRegion, BufferedPointVsCap) {
 //
 // The "radius" parameter is an S1Angle for convenience.
 // TODO(ericv): Add Degrees, Radians, etc, methods to S1ChordAngle?
-void TestBufferIndex(const string& index_str, S1Angle radius_angle,
+void TestBufferIndex(string_view index_str, S1Angle radius_angle,
                      S2RegionCoverer* coverer) {
   auto index = MakeIndexOrDie(index_str);
   S1ChordAngle radius(radius_angle);

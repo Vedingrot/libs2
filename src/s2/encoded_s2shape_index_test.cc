@@ -17,41 +17,53 @@
 
 #include "s2/encoded_s2shape_index.h"
 
+#include <cstddef>
+
 #include <algorithm>
-#include <map>
+#include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include "absl/base/call_once.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
+#include "s2/util/coding/coder.h"
 #include "s2/mutable_s2shape_index.h"
+#include "s2/s1angle.h"
 #include "s2/s2builder.h"
+#include "s2/s2builder_layer.h"
 #include "s2/s2builderutil_s2polyline_layer.h"
 #include "s2/s2builderutil_snap_functions.h"
 #include "s2/s2cap.h"
+#include "s2/s2cell_id.h"
 #include "s2/s2closest_edge_query.h"
+#include "s2/s2coder.h"
 #include "s2/s2contains_point_query.h"
 #include "s2/s2edge_distances.h"
+#include "s2/s2error.h"
 #include "s2/s2latlng.h"
 #include "s2/s2lax_polygon_shape.h"
 #include "s2/s2lax_polyline_shape.h"
 #include "s2/s2loop.h"
+#include "s2/s2point.h"
 #include "s2/s2point_vector_shape.h"
 #include "s2/s2pointutil.h"
+#include "s2/s2polygon.h"
+#include "s2/s2polyline.h"
+#include "s2/s2shape.h"
 #include "s2/s2shapeutil_coding.h"
 #include "s2/s2shapeutil_testing.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 #include "s2/thread_testing.h"
 
-using absl::make_unique;
 using absl::StrCat;
 using s2builderutil::S2CellIdSnapFunction;
 using s2builderutil::S2PolylineLayer;
+using std::make_unique;
 using std::max;
 using std::string;
 using std::unique_ptr;
@@ -117,6 +129,11 @@ TEST(EncodedS2ShapeIndex, RegularLoops) {
   }
 }
 
+#if !defined( __EMSCRIPTEN__) && !(defined(__ANDROID__) && defined(__i386__))
+// TODO(b/232496949): This test relies on `random()` return values because
+// it tests an exact encoded byte size.  Either change it to accept a range
+// of sizes, or decode and check either the number of shapes, or possibly
+// the points themselves by resetting the RNG state.
 TEST(EncodedS2ShapeIndex, OverlappingPointClouds) {
   struct TestCase {
     int num_shapes, num_points_per_shape;
@@ -144,6 +161,7 @@ TEST(EncodedS2ShapeIndex, OverlappingPointClouds) {
   }
 }
 
+// TODO(b/232496949): This test relies on `random()` return values.
 TEST(EncodedS2ShapeIndex, OverlappingPolylines) {
   struct TestCase {
     int num_shapes, num_shape_edges;
@@ -174,6 +192,7 @@ TEST(EncodedS2ShapeIndex, OverlappingPolylines) {
   }
 }
 
+// TODO(b/232496949): This test relies on `random()` return values.
 TEST(EncodedS2ShapeIndex, OverlappingLoops) {
   struct TestCase {
     int num_shapes, max_edges_per_loop;
@@ -203,6 +222,7 @@ TEST(EncodedS2ShapeIndex, OverlappingLoops) {
         index, test_case.expected_bytes);
   }
 }
+#endif  // defined(__EMSCRIPTEN__)
 
 // Like S2PolylineLayer, but converts the polyline to an S2LaxPolylineShape
 // and adds it to an S2ShapeIndex (if the polyline is non-empty).
@@ -221,13 +241,13 @@ class IndexedLaxPolylineLayer : public S2Builder::Layer {
   void Build(const Graph& g, S2Error* error) override {
     layer_.Build(g, error);
     if (error->ok() && polyline_->num_vertices() > 0) {
-      index_->Add(absl::make_unique<S2LaxPolylineShape>(*polyline_));
+      index_->Add(make_unique<S2LaxPolylineShape>(*polyline_));
     }
   }
 
  private:
   MutableS2ShapeIndex* index_;
-  std::unique_ptr<S2Polyline> polyline_;
+  unique_ptr<S2Polyline> polyline_;
   S2PolylineLayer layer_;
 };
 
@@ -240,7 +260,7 @@ TEST(EncodedS2ShapeIndex, SnappedFractalPolylines) {
     fractal.SetLevelForApproxMaxEdges(3 * 256);
     auto frame = S2::GetFrame(S2LatLng::FromDegrees(10, i).ToPoint());
     auto loop = fractal.MakeLoop(frame, S1Angle::Degrees(0.1));
-    std::vector<S2Point> vertices;
+    vector<S2Point> vertices;
     S2Testing::AppendLoopVertices(*loop, &vertices);
     S2Polyline polyline(vertices);
     builder.AddPolyline(polyline);
@@ -283,12 +303,12 @@ class LazyDecodeTest : public s2testing::ReaderWriterTest {
       }
     }
     Encoder encoder;
-    s2shapeutil::CompactEncodeTaggedShapes(input, &encoder);
+    S2_CHECK(s2shapeutil::CompactEncodeTaggedShapes(input, &encoder));
     input.Encode(&encoder);
     encoded_.assign(encoder.base(), encoder.length());
 
     Decoder decoder(encoded_.data(), encoded_.size());
-    index_.Init(&decoder, s2shapeutil::LazyDecodeShapeFactory(&decoder));
+    S2_CHECK(index_.Init(&decoder, s2shapeutil::LazyDecodeShapeFactory(&decoder)));
   }
 
   void WriteOp() override {
@@ -337,7 +357,8 @@ TEST(EncodedS2ShapeIndex, JavaByteCompatibility) {
       "B805F6EF3F28516A6D8FDBA13F27DCF7C958DEA13F28C809010408020010");
   Decoder decoder(bytes.data(), bytes.length());
   MutableS2ShapeIndex actual;
-  actual.Init(&decoder, s2shapeutil::FullDecodeShapeFactory(&decoder));
+  ASSERT_TRUE(
+      actual.Init(&decoder, s2shapeutil::FullDecodeShapeFactory(&decoder)));
 
   s2testing::ExpectEqual(expected, actual);
 }

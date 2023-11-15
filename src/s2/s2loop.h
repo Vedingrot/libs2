@@ -22,7 +22,7 @@
 #include <bitset>
 #include <cmath>
 #include <cstddef>
-#include <map>
+#include <memory>
 #include <vector>
 
 #include "absl/base/macros.h"
@@ -35,11 +35,17 @@
 #include "s2/s1angle.h"
 #include "s2/s1chord_angle.h"
 #include "s2/s2debug.h"
+#include "s2/s2error.h"
 #include "s2/s2latlng_rect.h"
 #include "s2/s2loop_measures.h"
+#include "s2/s2point.h"
+#include "s2/s2point_span.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2region.h"
+#include "s2/s2shape.h"
 #include "s2/s2shape_index.h"
+#include "s2/testing/gtest_prod.h"
+#include "s2/util/coding/coder.h"
 #include "s2/util/math/matrix3x3.h"
 #include "s2/util/math/vector.h"
 
@@ -53,8 +59,10 @@ class S2Cell;
 class S2CrossingEdgeQuery;
 class S2Error;
 class S2Loop;
+namespace s2builderutil {
+class S2PolygonLayer;
+}  // namespace s2builderutil
 struct S2XYZFaceSiTi;
-namespace s2builderutil { class S2PolygonLayer; }
 
 // An S2Loop represents a simple spherical polygon.  It consists of a single
 // chain of vertices where the first vertex is implicitly connected to the
@@ -89,6 +97,11 @@ class S2Loop final : public S2Region {
   // Default constructor.  The loop must be initialized by calling Init() or
   // Decode() before it is used.
   S2Loop();
+
+#ifndef SWIG
+  S2Loop(S2Loop&&);
+  S2Loop& operator=(S2Loop&&);
+#endif
 
   // Convenience constructor that calls Init() with the given vertices.
   explicit S2Loop(absl::Span<const S2Point> vertices);
@@ -201,7 +214,7 @@ class S2Loop final : public S2Region {
   // Returns an S2PointLoopSpan containing the loop vertices, for use with the
   // functions defined in s2loop_measures.h.
   S2PointLoopSpan vertices_span() const {
-    return S2PointLoopSpan(vertices_, num_vertices());
+    return S2PointLoopSpan(vertices_.get(), num_vertices());
   }
 
   // Returns true if this is the special empty loop that contains no points.
@@ -334,17 +347,6 @@ class S2Loop final : public S2Region {
   bool BoundaryNear(const S2Loop& b,
                     S1Angle max_error = S1Angle::Radians(1e-15)) const;
 
-#ifndef SWIG
-  ABSL_DEPRECATED("Inline the implementation")
-  bool Contains(const S2Loop* b) const { return Contains(*b); }
-  ABSL_DEPRECATED("Inline the implementation")
-  bool Intersects(const S2Loop* b) const { return Intersects(*b); }
-  ABSL_DEPRECATED("Inline the implementation")
-  bool Equals(const S2Loop* b) const { return Equals(*b); }
-  ABSL_DEPRECATED("Inline the implementation")
-  bool BoundaryEquals(const S2Loop* b) const { return BoundaryEquals(*b); }
-#endif
-
   // This method computes the oriented surface integral of some quantity f(x)
   // over the loop interior, given a function f_tri(A,B,C) that returns the
   // corresponding integral over the spherical triangle ABC.  Here "oriented
@@ -425,12 +427,6 @@ class S2Loop final : public S2Region {
   // This method may be called with loops that have already been initialized.
   bool Decode(Decoder* const decoder);
 
-  // Provides the same functionality as Decode, except that decoded regions
-  // are allowed to point directly into the Decoder's memory buffer rather
-  // than copying the data.  This can be much faster, but the decoded loop is
-  // only valid within the scope (lifetime) of the Decoder's memory buffer.
-  bool DecodeWithinScope(Decoder* const decoder);
-
   ////////////////////////////////////////////////////////////////////////
   // Methods intended primarily for use by the S2Polygon implementation:
 
@@ -468,17 +464,6 @@ class S2Loop final : public S2Region {
   // REQUIRES: if b->is_full(), then reverse_b == false.
   bool ContainsNonCrossingBoundary(const S2Loop& b, bool reverse_b) const;
 
-#ifndef SWIG
-  ABSL_DEPRECATED("Inline the implementation")
-  bool ContainsNested(const S2Loop* b) const { return ContainsNested(*b); }
-  ABSL_DEPRECATED("Inline the implementation")
-  int CompareBoundary(const S2Loop* b) const { return CompareBoundary(*b); }
-  ABSL_DEPRECATED("Inline the implementation")
-  bool ContainsNonCrossingBoundary(const S2Loop* b, bool reverse_b) const {
-    return ContainsNonCrossingBoundary(*b, reverse_b);
-  }
-#endif
-
   // Wrapper class for indexing a loop (see S2ShapeIndex).  Once this object
   // is inserted into an S2ShapeIndex it is owned by that index, and will be
   // automatically deleted when no longer needed by the index.  Note that this
@@ -487,6 +472,9 @@ class S2Loop final : public S2Region {
   // details).
 #ifndef SWIG
   class Shape : public S2Shape {
+    // To update `loop_` in `S2Loop` move constructor/assignment.
+    friend class S2Loop;
+
    public:
     Shape() : loop_(nullptr) {}  // Must call Init().
 
@@ -518,6 +506,10 @@ class S2Loop final : public S2Region {
     }
 
    private:
+    // Allow the move constructor/operator= to update `loop_`
+    friend class S2Loop;
+    friend class S2LoopTestBase;
+
     const S2Loop* loop_;
   };
 
@@ -526,7 +518,7 @@ class S2Loop final : public S2Region {
   // is constructed solely for the purpose of indexing it.
   class OwningShape : public Shape {
    public:
-    OwningShape() {}  // Must call Init().
+    OwningShape() = default;  // Must call Init().
     explicit OwningShape(std::unique_ptr<const S2Loop> loop)
         : Shape(loop.release()) {
     }
@@ -546,6 +538,9 @@ class S2Loop final : public S2Region {
   friend class S2LoopTestBase;
   friend class LoopCrosser;
   friend class s2builderutil::S2PolygonLayer;
+
+  // So that test can access InitIndex().
+  FRIEND_TEST(S2LoopTestBase, PointersCorrectAfterMove);
 
   // Internal copy constructor used only by Clone() that makes a deep copy of
   // its argument.
@@ -574,12 +569,8 @@ class S2Loop final : public S2Region {
   // loop self-intersections.
   bool FindValidationErrorNoIndex(S2Error* error) const;
 
-  // Internal implementation of the Decode and DecodeWithinScope methods above.
-  // If within_scope is true, memory is allocated for vertices_ and data
-  // is copied from the decoder using std::copy. If it is false, vertices_
-  // will point to the memory area inside the decoder, and the field
-  // owns_vertices_ is set to false.
-  bool DecodeInternal(Decoder* const decoder, bool within_scope);
+  // Internal implementation of the Decode method above.
+  bool DecodeInternal(Decoder* const decoder);
 
   // Converts the loop vertices to the S2XYZFaceSiTi format and store the result
   // in the given array, which must be large enough to store all the vertices.
@@ -657,12 +648,8 @@ class S2Loop final : public S2Region {
   // We store the vertices in an array rather than a vector because we don't
   // need any STL methods, and computing the number of vertices using size()
   // would be relatively expensive (due to division by sizeof(S2Point) == 24).
-  // When DecodeWithinScope is used to initialize the loop, we do not
-  // take ownership of the memory for vertices_, and the owns_vertices_ field
-  // is used to prevent deallocation and overwriting.
   int num_vertices_ = 0;
-  S2Point* vertices_ = nullptr;
-  bool owns_vertices_ = false;
+  std::unique_ptr<S2Point[]> vertices_;
 
   S2Debug s2debug_override_ = S2Debug::ALLOW;
   bool origin_inside_ = false;  // Does the loop contain S2::Origin()?

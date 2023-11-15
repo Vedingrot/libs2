@@ -21,8 +21,12 @@
 #include <vector>
 
 #include "s2/base/log_severity.h"
+#include "s2/s1angle.h"
 #include "s2/s2loop_measures.h"
+#include "s2/s2point.h"
+#include "s2/s2point_span.h"
 #include "s2/s2polyline_measures.h"
+#include "s2/s2shape.h"
 
 using std::fabs;
 using std::vector;
@@ -133,7 +137,7 @@ S2Point GetCentroid(const S2Shape& shape) {
 }
 
 void GetChainVertices(const S2Shape& shape, int chain_id,
-                      std::vector<S2Point>* vertices) {
+                      vector<S2Point>* vertices) {
   S2Shape::Chain chain = shape.chain(chain_id);
   int num_vertices = chain.length + (shape.dimension() == 1);
   vertices->clear();

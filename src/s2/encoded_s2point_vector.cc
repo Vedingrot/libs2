@@ -17,12 +17,26 @@
 
 #include "s2/encoded_s2point_vector.h"
 
-#include <algorithm>
+#include <cstddef>
 
+#include <algorithm>
+#include <limits>
+#include <vector>
+
+#include "s2/base/integral_types.h"
+#include "s2/base/port.h"
 #include "absl/base/internal/unaligned_access.h"
+#include "absl/numeric/bits.h"
+#include "absl/types/span.h"
 #include "s2/util/bits/bits.h"
+#include "s2/util/coding/coder.h"
+#include "s2/util/coding/varint.h"
+#include "s2/encoded_string_vector.h"
+#include "s2/encoded_uint_vector.h"
 #include "s2/s2cell_id.h"
+#include "s2/s2coder.h"
 #include "s2/s2coords.h"
+#include "s2/s2point.h"
 
 using absl::MakeSpan;
 using absl::Span;
@@ -35,7 +49,8 @@ namespace s2coding {
 // Like util_bits::InterleaveUint32, but interleaves bit pairs rather than
 // individual bits.  This format is faster to decode than the fully interleaved
 // format, and produces the same results for our use case.
-inline uint64 InterleaveUint32BitPairs(const uint32 val0, const uint32 val1) {
+inline uint64 InterleaveUint32BitPairs(const uint32 val0,
+                                         const uint32 val1) {
   uint64 v0 = val0, v1 = val1;
   v0 = (v0 | (v0 << 16)) & 0x0000ffff0000ffff;
   v1 = (v1 | (v1 << 16)) & 0x0000ffff0000ffff;
@@ -52,8 +67,8 @@ inline uint64 InterleaveUint32BitPairs(const uint32 val0, const uint32 val1) {
 // uses a lookup table.  The speed advantage is expected to be even larger in
 // code that mixes bit interleaving with other significant operations since it
 // doesn't require keeping a 256-byte lookup table in the L1 data cache.
-inline void DeinterleaveUint32BitPairs(uint64 code,
-                                       uint32 *val0, uint32 *val1) {
+inline void DeinterleaveUint32BitPairs(uint64 code, uint32* val0,
+                                       uint32* val1) {
   uint64 v0 = code, v1 = code >> 2;
   v0 &= 0x3333333333333333;
   v0 |= v0 >> 2;
@@ -98,7 +113,7 @@ void EncodeS2PointVector(Span<const S2Point> points, CodingHint hint,
       return EncodeS2PointVectorCompact(points, encoder);
 
     default:
-      S2_LOG(DFATAL) << "Unknown CodingHint: " << static_cast<int>(hint);
+      S2_LOG(ERROR) << "Unknown CodingHint: " << static_cast<int>(hint);
   }
 }
 
@@ -123,7 +138,7 @@ bool EncodedS2PointVector::Init(Decoder* decoder) {
 vector<S2Point> EncodedS2PointVector::Decode() const {
   vector<S2Point> points;
   points.reserve(size_);
-  for (int i = 0; i < size_; ++i) {
+  for (size_t i = 0; i < size_; ++i) {
     points.push_back((*this)[i]);
   }
   return points;
@@ -166,7 +181,7 @@ void EncodeS2PointVectorFast(Span<const S2Point> points, Encoder* encoder) {
   // This is followed by an array of S2Points in little-endian order.
   encoder->Ensure(Varint::kMax64 + points.size() * sizeof(S2Point));
   uint64 size_format = (points.size() << kEncodingFormatBits |
-                        EncodedS2PointVector::UNCOMPRESSED);
+                          EncodedS2PointVector::UNCOMPRESSED);
   encoder->put_varint64(size_format);
   encoder->putn(points.data(), points.size() * sizeof(S2Point));
 }
@@ -174,15 +189,15 @@ void EncodeS2PointVectorFast(Span<const S2Point> points, Encoder* encoder) {
 bool EncodedS2PointVector::InitUncompressedFormat(Decoder* decoder) {
 #if !defined(IS_LITTLE_ENDIAN) || defined(__arm__) || \
   defined(ABSL_INTERNAL_NEED_ALIGNED_LOADS)
-  // TODO(ericv): Make this work on platforms that don't support unaligned
-  // 64-bit little-endian reads, e.g. by falling back to
+  // TODO(b/231674214): Make this work on platforms that don't support
+  // unaligned 64-bit little-endian reads, e.g. by falling back to
   //
   //   bit_cast<double>(little_endian::Load64()).
   //
   // Maybe the compiler is smart enough that we can do this all the time,
   // but more likely we will need two cases using the #ifdef above.
   // (Note that even ARMv7 does not support unaligned 64-bit loads.)
-  S2_LOG(DFATAL) << "Needs architecture with 64-bit little-endian unaligned loads";
+  S2_LOG(ERROR) << "Needs architecture with 64-bit little-endian unaligned loads";
   return false;
 #endif
 
@@ -213,7 +228,7 @@ bool EncodedS2PointVector::InitUncompressedFormat(Decoder* decoder) {
 struct CellPoint {
   // Constructor necessary in order to narrow "int" arguments to "int8".
   CellPoint(int level, int face, uint32 si, uint32 ti)
-    : level(level), face(face), si(si), ti(ti) {}
+      : level(level), face(face), si(si), ti(ti) {}
 
   int8 level, face;
   uint32 si, ti;
@@ -240,9 +255,7 @@ struct BlockCode {
 };
 
 // Returns a bit mask with "n" low-order 1 bits, for 0 <= n <= 64.
-inline uint64 BitMask(int n) {
-  return (n == 0) ? 0 : (~0ULL >> (64 - n));
-}
+inline uint64 BitMask(int n) { return (n == 0) ? 0 : (~0ULL >> (64 - n)); }
 
 // Returns the maximum number of bits per value at the given S2CellId level.
 inline int MaxBitsForLevel(int level) {
@@ -259,9 +272,9 @@ inline int BaseShift(int level, int base_bits) {
 // Forward declarations.
 int ChooseBestLevel(Span<const S2Point> points, vector<CellPoint>* cell_points);
 vector<uint64> ConvertCellsToValues(const vector<CellPoint>& cell_points,
-                                    int level, bool* have_exceptions);
-uint64 ChooseBase(const vector<uint64>& values, int level, bool have_exceptions,
-                  int* base_bits);
+                                      int level, bool* have_exceptions);
+uint64 ChooseBase(const vector<uint64>& values, int level,
+                    bool have_exceptions, int* base_bits);
 BlockCode GetBlockCode(Span<const uint64> values, uint64 base,
                        bool have_exceptions);
 
@@ -434,8 +447,8 @@ void EncodeS2PointVectorCompact(Span<const S2Point> points, Encoder* encoder) {
   //
   // TODO(ericv): Benchmark using shifted S2CellIds instead.
   bool have_exceptions;
-  vector<uint64> values = ConvertCellsToValues(cell_points, level,
-                                               &have_exceptions);
+  vector<uint64> values =
+      ConvertCellsToValues(cell_points, level, &have_exceptions);
 
   // 3. Choose the global encoding parameter "base" (consisting of the bit
   // prefix shared by all values to be encoded).
@@ -463,10 +476,7 @@ void EncodeS2PointVectorCompact(Span<const S2Point> points, Encoder* encoder) {
   // Now we encode the contents of each block.
   StringVectorEncoder blocks;
   vector<S2Point> exceptions;
-  uint64 offset_bytes_sum = 0;
-  uint64 delta_nibbles_sum = 0;
-  uint64 exceptions_sum = 0;
-  for (int i = 0; i < values.size(); i += kBlockSize) {
+  for (size_t i = 0; i < values.size(); i += kBlockSize) {
     int block_size = min(kBlockSize, values.size() - i);
     BlockCode code = GetBlockCode(MakeSpan(&values[i], block_size),
                                   base, have_exceptions);
@@ -535,9 +545,6 @@ void EncodeS2PointVectorCompact(Span<const S2Point> points, Encoder* encoder) {
       block->Ensure(exceptions_bytes);
       block->putn(exceptions.data(), exceptions_bytes);
     }
-    offset_bytes_sum += offset_bytes;
-    delta_nibbles_sum += delta_nibbles;
-    exceptions_sum += num_exceptions;
   }
   blocks.Encode(encoder);
 }
@@ -589,7 +596,7 @@ int ChooseBestLevel(Span<const S2Point> points,
 // indicated by the value "kException".  "have_exceptions" is set to indicate
 // whether any exceptions were present.
 vector<uint64> ConvertCellsToValues(const vector<CellPoint>& cell_points,
-                                    int level, bool* have_exceptions) {
+                                      int level, bool* have_exceptions) {
   vector<uint64> values;
   values.reserve(cell_points.size());
   *have_exceptions = false;
@@ -615,8 +622,8 @@ vector<uint64> ConvertCellsToValues(const vector<CellPoint>& cell_points,
   return values;
 }
 
-uint64 ChooseBase(const vector<uint64>& values, int level, bool have_exceptions,
-                  int* base_bits) {
+uint64 ChooseBase(const vector<uint64>& values, int level,
+                    bool have_exceptions, int* base_bits) {
   // Find the minimum and maximum non-exception values to be represented.
   uint64 v_min = kException, v_max = 0;
   for (auto v : values) {
@@ -639,8 +646,8 @@ uint64 ChooseBase(const vector<uint64>& values, int level, bool have_exceptions,
   // 2. The format only allows us to represent up to 7 bytes (56 bits) of
   // "base", so we need to ensure that "base" conforms to this requirement.
   int min_delta_bits = (have_exceptions || values.size() == 1) ? 8 : 4;
-  int excluded_bits = max(Bits::Log2Floor64(v_min ^ v_max) + 1,
-                          max(min_delta_bits, BaseShift(level, 56)));
+  int excluded_bits = max<int>(absl::bit_width(v_min ^ v_max),
+                               max(min_delta_bits, BaseShift(level, 56)));
   uint64 base = v_min & ~BitMask(excluded_bits);
 
   // Determine how many bytes are needed to represent this prefix.
@@ -665,8 +672,8 @@ uint64 ChooseBase(const vector<uint64>& values, int level, bool have_exceptions,
 
 // Returns true if the range of values [d_min, d_max] can be encoded using the
 // specified parameters (delta_bits, overlap_bits, and have_exceptions).
-bool CanEncode(uint64 d_min, uint64 d_max, int delta_bits,
-               int overlap_bits, bool have_exceptions) {
+bool CanEncode(uint64 d_min, uint64 d_max, int delta_bits, int overlap_bits,
+               bool have_exceptions) {
   // "offset" can't represent the lowest (delta_bits - overlap_bits) of d_min.
   d_min &= ~BitMask(delta_bits - overlap_bits);
 
@@ -741,7 +748,8 @@ BlockCode GetBlockCode(Span<const uint64> values, uint64 base,
   //
   // It is possible to show that this last example is the worst case, i.e.  we
   // do not need to consider increasing delta_bits or overlap_bits further.
-  int delta_bits = (max(1, Bits::Log2Floor64(b_max - b_min)) + 3) & ~3;
+  int delta_bits =
+      (max(1, static_cast<int>(absl::bit_width(b_max - b_min)) - 1) + 3) & ~3;
   int overlap_bits = 0;
   if (!CanEncode(b_min, b_max, delta_bits, 0, have_exceptions)) {
     if (CanEncode(b_min, b_max, delta_bits, 4, have_exceptions)) {
@@ -821,7 +829,8 @@ S2Point EncodedS2PointVector::DecodeCellIdsFormat(int i) const {
 
   // Decode the offset for this block.
   int offset_shift = (delta_nibbles - overlap_nibbles) << 2;
-  uint64 offset = GetUintWithLength<uint64>(ptr, offset_bytes) << offset_shift;
+  uint64 offset = GetUintWithLength<uint64>(ptr, offset_bytes)
+                    << offset_shift;
   ptr += offset_bytes;
 
   // Decode the delta for the requested value.

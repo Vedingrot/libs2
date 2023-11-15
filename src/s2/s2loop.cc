@@ -17,56 +17,66 @@
 
 #include "s2/s2loop.h"
 
+#include <cstddef>
+
 #include <algorithm>
 #include <atomic>
 #include <bitset>
-#include <cfloat>
 #include <cmath>
-#include <set>
+#include <memory>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/types/span.h"
+#include "absl/utility/utility.h"
 
 #include "s2/base/commandlineflags.h"
 #include "s2/base/integral_types.h"
 #include "s2/base/logging.h"
-#include "s2/util/coding/coder.h"
 #include "s2/mutable_s2shape_index.h"
 #include "s2/r1interval.h"
+#include "s2/r2.h"
+#include "s2/r2rect.h"
 #include "s2/s1angle.h"
+#include "s2/s1chord_angle.h"
 #include "s2/s1interval.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
-#include "s2/s2centroids.h"
+#include "s2/s2cell_id.h"
+#include "s2/s2cell_union.h"
 #include "s2/s2closest_edge_query.h"
 #include "s2/s2coords.h"
 #include "s2/s2crossing_edge_query.h"
 #include "s2/s2debug.h"
 #include "s2/s2edge_clipping.h"
 #include "s2/s2edge_crosser.h"
+#include "s2/s2edge_crossings.h"
 #include "s2/s2edge_distances.h"
 #include "s2/s2error.h"
+#include "s2/s2latlng_rect.h"
 #include "s2/s2latlng_rect_bounder.h"
-#include "s2/s2measures.h"
+#include "s2/s2loop_measures.h"
 #include "s2/s2padded_cell.h"
+#include "s2/s2point.h"
 #include "s2/s2point_compression.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2predicates.h"
+#include "s2/s2region.h"
+#include "s2/s2shape.h"
 #include "s2/s2shape_index.h"
 #include "s2/s2shapeutil_visit_crossing_edge_pairs.h"
 #include "s2/s2wedge_relations.h"
 #include "s2/util/coding/coder.h"
-#include "s2/util/coding/coder.h"
 #include "s2/util/math/matrix3x3.h"
 
-using absl::make_unique;
+using absl::flat_hash_set;
 using absl::MakeSpan;
 using absl::Span;
+using std::make_unique;
 using std::pair;
-using std::set;
+using std::unique_ptr;
 using std::vector;
 
 S2_DEFINE_bool(
@@ -97,6 +107,50 @@ S2Loop::S2Loop() {
   // The loop is not valid until Init() is called.
 }
 
+#ifndef SWIG
+S2Loop::S2Loop(S2Loop&& b)
+    : S2Region(std::move(b)),
+      depth_(absl::exchange(b.depth_, 0)),
+      num_vertices_(absl::exchange(b.num_vertices_, 0)),
+      vertices_(std::move(b.vertices_)),
+      s2debug_override_(std::move(b.s2debug_override_)),
+      origin_inside_(std::move(b.origin_inside_)),
+      unindexed_contains_calls_(
+          b.unindexed_contains_calls_.exchange(0, std::memory_order_relaxed)),
+      bound_(std::move(b.bound_)),
+      subregion_bound_(std::move(b.subregion_bound_)),
+      index_(std::move(b.index_)) {
+  // Our index points to S2Loop::Shape instances which point back to S2Loop,
+  // we need to update those S2Loop pointers now that we've moved.
+  for (S2Shape* shape : index_) {
+    down_cast<Shape*>(shape)->loop_ = this;
+  }
+}
+
+S2Loop& S2Loop::operator=(S2Loop&& b) {
+  S2Region::operator=(static_cast<S2Region&&>(b));
+  depth_ = absl::exchange(b.depth_, 0);
+  num_vertices_ = absl::exchange(b.num_vertices_, 0);
+  vertices_ = std::move(b.vertices_);
+  s2debug_override_ = std::move(b.s2debug_override_);
+  origin_inside_ = std::move(b.origin_inside_);
+  unindexed_contains_calls_.store(
+      b.unindexed_contains_calls_.exchange(0, std::memory_order_relaxed),
+      std::memory_order_relaxed);
+  bound_ = std::move(b.bound_);
+  subregion_bound_ = std::move(b.subregion_bound_);
+  index_ = std::move(b.index_);
+
+  // Our index points to S2Loop::Shape instances which point back to S2Loop,
+  // we need to update those S2Loop pointers now that we've moved.
+  for (S2Shape* shape : index_) {
+    down_cast<Shape*>(shape)->loop_ = this;
+  }
+
+  return *this;
+}
+#endif
+
 S2Loop::S2Loop(Span<const S2Point> vertices)
   : S2Loop(vertices, S2Debug::ALLOW) {}
 
@@ -120,11 +174,9 @@ void S2Loop::ClearIndex() {
 
 void S2Loop::Init(Span<const S2Point> vertices) {
   ClearIndex();
-  if (owns_vertices_) delete[] vertices_;
   num_vertices_ = vertices.size();
-  vertices_ = new S2Point[num_vertices_];
+  vertices_ = make_unique<S2Point[]>(num_vertices_);
   std::copy(vertices.begin(), vertices.end(), &vertices_[0]);
-  owns_vertices_ = true;
   InitOriginAndBound();
 }
 
@@ -286,7 +338,6 @@ S2Loop::S2Loop(const S2Cell& cell)
     : depth_(0),
       num_vertices_(4),
       vertices_(new S2Point[num_vertices_]),
-      owns_vertices_(true),
       s2debug_override_(S2Debug::ALLOW),
       unindexed_contains_calls_(0) {
   for (int i = 0; i < 4; ++i) {
@@ -297,15 +348,12 @@ S2Loop::S2Loop(const S2Cell& cell)
   InitOriginAndBound();
 }
 
-S2Loop::~S2Loop() {
-  if (owns_vertices_) delete[] vertices_;
-}
+S2Loop::~S2Loop() = default;
 
 S2Loop::S2Loop(const S2Loop& src)
     : depth_(src.depth_),
       num_vertices_(src.num_vertices_),
-      vertices_(new S2Point[num_vertices_]),
-      owns_vertices_(true),
+      vertices_(make_unique<S2Point[]>(num_vertices_)),
       s2debug_override_(src.s2debug_override_),
       origin_inside_(src.origin_inside_),
       unindexed_contains_calls_(0),
@@ -349,18 +397,16 @@ bool S2Loop::IsNormalized() const {
 }
 
 void S2Loop::Normalize() {
-  S2_CHECK(owns_vertices_);
   if (!IsNormalized()) Invert();
   S2_DCHECK(IsNormalized());
 }
 
 void S2Loop::Invert() {
-  S2_CHECK(owns_vertices_);
   ClearIndex();
   if (is_empty_or_full()) {
     vertices_[0] = is_full() ? kEmptyVertex() : kFullVertex();
   } else {
-    std::reverse(vertices_, vertices_ + num_vertices());
+    std::reverse(&vertices_[0], &vertices_[num_vertices()]);
   }
   // origin_inside_ must be set correctly before building the S2ShapeIndex.
   origin_inside_ ^= true;
@@ -437,7 +483,7 @@ S2Cap S2Loop::GetCapBound() const {
 
 bool S2Loop::Contains(const S2Cell& target) const {
   MutableS2ShapeIndex::Iterator it(&index_);
-  S2ShapeIndex::CellRelation relation = it.Locate(target.id());
+  S2CellRelation relation = it.Locate(target.id());
 
   // If "target" is disjoint from all index cells, it is not contained.
   // Similarly, if "target" is subdivided into one or more index cells then it
@@ -445,7 +491,7 @@ bool S2Loop::Contains(const S2Cell& target) const {
   // intersect a sufficient number of edges.  (But note that if "target" itself
   // is an index cell then it may be contained, since it could be a cell with
   // no edges in the loop interior.)
-  if (relation != S2ShapeIndex::INDEXED) return false;
+  if (relation != S2CellRelation::INDEXED) return false;
 
   // Otherwise check if any edges intersect "target".
   if (BoundaryApproxIntersects(it, target)) return false;
@@ -456,14 +502,14 @@ bool S2Loop::Contains(const S2Cell& target) const {
 
 bool S2Loop::MayIntersect(const S2Cell& target) const {
   MutableS2ShapeIndex::Iterator it(&index_);
-  S2ShapeIndex::CellRelation relation = it.Locate(target.id());
+  S2CellRelation relation = it.Locate(target.id());
 
   // If "target" does not overlap any index cell, there is no intersection.
-  if (relation == S2ShapeIndex::DISJOINT) return false;
+  if (relation == S2CellRelation::DISJOINT) return false;
 
   // If "target" is subdivided into one or more index cells, there is an
   // intersection to within the S2ShapeIndex error bound (see Contains).
-  if (relation == S2ShapeIndex::SUBDIVIDED) return true;
+  if (relation == S2CellRelation::SUBDIVIDED) return true;
 
   // If "target" is an index cell, there is an intersection because index cells
   // are created only if they have at least one edge or they are entirely
@@ -581,11 +627,11 @@ bool S2Loop::Contains(const MutableS2ShapeIndex::Iterator& it,
 }
 
 void S2Loop::Encode(Encoder* const encoder) const {
-  encoder->Ensure(num_vertices_ * sizeof(*vertices_) + 20);  // sufficient
+  encoder->Ensure(num_vertices_ * sizeof(vertices_[0]) + 20);  // sufficient
 
   encoder->put8(kCurrentLosslessEncodingVersionNumber);
   encoder->put32(num_vertices_);
-  encoder->putn(vertices_, sizeof(*vertices_) * num_vertices_);
+  encoder->putn(vertices_.get(), sizeof(vertices_[0]) * num_vertices_);
   encoder->put8(origin_inside_);
   encoder->put32(depth_);
   S2_DCHECK_GE(encoder->avail(), 0);
@@ -598,60 +644,30 @@ bool S2Loop::Decode(Decoder* const decoder) {
   unsigned char version = decoder->get8();
   switch (version) {
     case kCurrentLosslessEncodingVersionNumber:
-      return DecodeInternal(decoder, false);
+      return DecodeInternal(decoder);
   }
   return false;
 }
 
-bool S2Loop::DecodeWithinScope(Decoder* const decoder) {
-  if (decoder->avail() < sizeof(unsigned char)) return false;
-  unsigned char version = decoder->get8();
-  switch (version) {
-    case kCurrentLosslessEncodingVersionNumber:
-      return DecodeInternal(decoder, true);
-  }
-  return false;
-}
-
-bool S2Loop::DecodeInternal(Decoder* const decoder,
-                            bool within_scope) {
+bool S2Loop::DecodeInternal(Decoder* const decoder) {
   // Perform all checks before modifying vertex state. Empty loops are
   // explicitly allowed here: a newly created loop has zero vertices
   // and such loops encode and decode properly.
   if (decoder->avail() < sizeof(uint32)) return false;
   const uint32 num_vertices = decoder->get32();
-  if (num_vertices > absl::GetFlag(FLAGS_s2polygon_decode_max_num_vertices)) {
+  if (num_vertices > static_cast<uint32>(absl::GetFlag(
+                         FLAGS_s2polygon_decode_max_num_vertices))) {
     return false;
   }
-  if (decoder->avail() < (num_vertices * sizeof(*vertices_) +
+  if (decoder->avail() < (num_vertices * sizeof(vertices_[0]) +
                           sizeof(uint8) + sizeof(uint32))) {
     return false;
   }
   ClearIndex();
-  if (owns_vertices_) delete[] vertices_;
   num_vertices_ = num_vertices;
 
-  // x86 can do unaligned floating-point reads; however, many other
-  // platforms cannot. Do not use the zero-copy version if we are on
-  // an architecture that does not support unaligned reads, and the
-  // pointer is not correctly aligned.
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || \
-    defined(_M_IX86)
-  bool is_misaligned = false;
-#else
-  bool is_misaligned =
-      reinterpret_cast<intptr_t>(decoder->skip(0)) % sizeof(double) != 0;
-#endif
-  if (within_scope && !is_misaligned) {
-    vertices_ = const_cast<S2Point *>(reinterpret_cast<const S2Point*>(
-                    decoder->skip(0)));
-    decoder->skip(num_vertices_ * sizeof(*vertices_));
-    owns_vertices_ = false;
-  } else {
-    vertices_ = new S2Point[num_vertices_];
-    decoder->getn(vertices_, num_vertices_ * sizeof(*vertices_));
-    owns_vertices_ = true;
-  }
+  vertices_ = make_unique<S2Point[]>(num_vertices_);
+  decoder->getn(vertices_.get(), num_vertices_ * sizeof(vertices_[0]));
   origin_inside_ = decoder->get8();
   depth_ = decoder->get32();
   if (!bound_.Decode(decoder)) return false;
@@ -672,8 +688,8 @@ bool S2Loop::DecodeInternal(Decoder* const decoder,
 // loops (Contains, Intersects, or CompareBoundary).
 class LoopRelation {
  public:
-  LoopRelation() {}
-  virtual ~LoopRelation() {}
+  LoopRelation() = default;
+  virtual ~LoopRelation() = default;
 
   // Optionally, a_target() and b_target() can specify an early-exit condition
   // for the loop relation.  If any point P is found such that
@@ -1318,7 +1334,7 @@ static bool MatchBoundaries(const S2Loop& a, const S2Loop& b, int a_offset,
   // explored to avoid duplicating work.
 
   vector<pair<int, int>> pending;
-  set<pair<int, int>> done;
+  flat_hash_set<pair<int, int>> done;
   pending.push_back(std::make_pair(0, 0));
   while (!pending.empty()) {
     int i = pending.back().first;
@@ -1400,18 +1416,16 @@ bool S2Loop::DecodeCompressed(Decoder* decoder, int snap_level) {
     return false;
   }
   if (unsigned_num_vertices == 0 ||
-      unsigned_num_vertices >
-          absl::GetFlag(FLAGS_s2polygon_decode_max_num_vertices)) {
+      unsigned_num_vertices > static_cast<uint32>(absl::GetFlag(
+                                  FLAGS_s2polygon_decode_max_num_vertices))) {
     return false;
   }
   ClearIndex();
-  if (owns_vertices_) delete[] vertices_;
   num_vertices_ = unsigned_num_vertices;
-  vertices_ = new S2Point[num_vertices_];
-  owns_vertices_ = true;
+  vertices_ = make_unique<S2Point[]>(num_vertices_);
 
   if (!S2DecodePointsCompressed(decoder, snap_level,
-                                MakeSpan(vertices_, num_vertices_))) {
+                                MakeSpan(vertices_.get(), num_vertices_))) {
     return false;
   }
   uint32 properties_uint32;
@@ -1460,16 +1474,14 @@ std::bitset<kNumProperties> S2Loop::GetCompressedEncodingProperties() const {
 }
 
 /* static */
-std::unique_ptr<S2Loop> S2Loop::MakeRegularLoop(const S2Point& center,
-                                                S1Angle radius,
-                                                int num_vertices) {
+unique_ptr<S2Loop> S2Loop::MakeRegularLoop(const S2Point& center,
+                                           S1Angle radius, int num_vertices) {
   return MakeRegularLoop(S2::GetFrame(center), radius, num_vertices);
 }
 
 /* static */
-std::unique_ptr<S2Loop> S2Loop::MakeRegularLoop(const Matrix3x3_d& frame,
-                                                S1Angle radius,
-                                                int num_vertices) {
+unique_ptr<S2Loop> S2Loop::MakeRegularLoop(const Matrix3x3_d& frame,
+                                           S1Angle radius, int num_vertices) {
   // We construct the loop in the given frame coordinates, with the center at
   // (0, 0, 1).  For a loop of radius "r", the loop vertices have the form
   // (x, y, z) where x^2 + y^2 = sin(r) and z = cos(r).  The distance on the

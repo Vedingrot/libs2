@@ -17,25 +17,37 @@
 
 #include "s2/s2winding_operation.h"
 
+#include <cmath>
+
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
+#include "s2/mutable_s2shape_index.h"
 #include "s2/s1angle.h"
+#include "s2/s2boolean_operation.h"
+#include "s2/s2builder.h"
+#include "s2/s2builder_layer.h"
 #include "s2/s2builderutil_lax_polygon_layer.h"
 #include "s2/s2builderutil_snap_functions.h"
 #include "s2/s2cap.h"
 #include "s2/s2error.h"
 #include "s2/s2lax_polygon_shape.h"
 #include "s2/s2loop.h"
+#include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
+#include "s2/s2point_span.h"
+#include "s2/s2shape.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
+using absl::string_view;
 using s2builderutil::IdentitySnapFunction;
 using s2builderutil::IntLatLngSnapFunction;
+using std::make_unique;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -51,10 +63,11 @@ namespace {
 // use s2builderutil::IndexMatchingLayer because that class does not
 // distinguish empty from full polygons, and we don't need its ability to
 // match edge multiplicities here.)
-void ExpectWindingResult(
-    const S2WindingOperation::Options& options, const vector<string>& loop_strs,
-    const string& ref_point_str, int ref_winding,
-    S2WindingOperation::WindingRule rule, const string& expected_str) {
+void ExpectWindingResult(const S2WindingOperation::Options& options,
+                         const vector<string>& loop_strs,
+                         string_view ref_point_str, int ref_winding,
+                         S2WindingOperation::WindingRule rule,
+                         string_view expected_str) {
   MutableS2ShapeIndex expected;
   expected.Add(s2textformat::MakeLaxPolygonOrDie(expected_str));
   MutableS2ShapeIndex actual;
@@ -78,11 +91,12 @@ void ExpectWindingResult(
 
 // Like ExpectWindingResult(), but with two different expected results
 // depending on whether options.include_degeneracies() is false or true.
-void ExpectDegenerateWindingResult(
-    S2WindingOperation::Options options, const vector<string>& loop_strs,
-    const string& ref_point_str, int ref_winding,
-    S2WindingOperation::WindingRule rule,
-    const string& expected_str_false, const string& expected_str_true) {
+void ExpectDegenerateWindingResult(S2WindingOperation::Options options,
+                                   const vector<string>& loop_strs,
+                                   string_view ref_point_str, int ref_winding,
+                                   S2WindingOperation::WindingRule rule,
+                                   string_view expected_str_false,
+                                   string_view expected_str_true) {
   options.set_include_degeneracies(false);
   ExpectWindingResult(options, loop_strs, ref_point_str, ref_winding, rule,
                       expected_str_false);
@@ -269,6 +283,13 @@ TEST(S2WindingOperation, SymmetricDifferenceDegeneracies) {
        "0:0, 0:3, 3:3, 3:0", "1:1", "4:4", "5:5"},  // Geometry 2
       "10:10", 0, WindingRule::ODD,
       "", "2:2; 5:5");
+}
+
+TEST(S2WindingOperationOptions, SetGetSnapFunction) {
+  // Prevent these from being detected as dead code.
+  S2WindingOperation::Options opts;
+  opts.set_snap_function(IdentitySnapFunction());
+  EXPECT_EQ(opts.snap_function().snap_radius(), S1Angle::Zero());
 }
 
 }  // namespace

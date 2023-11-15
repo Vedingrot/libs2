@@ -22,8 +22,13 @@
 #include <memory>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include "absl/types/span.h"
+#include "s2/util/coding/coder.h"
 #include "s2/encoded_s2point_vector.h"
+#include "s2/s2coder.h"
+#include "s2/s2error.h"
+#include "s2/s2point.h"
 #include "s2/s2polyline.h"
 #include "s2/s2shape.h"
 
@@ -42,14 +47,14 @@ class S2LaxPolylineShape : public S2Shape {
   // in opensource.
   enum : TypeTag { kTypeTag = 4 };
 
+  typedef s2coding::S2HintCoder<S2LaxPolylineShape> Coder;
+
   // Constructs an empty polyline.
   S2LaxPolylineShape() : num_vertices_(0) {}
 
-  // Move constructor.
-  S2LaxPolylineShape(S2LaxPolylineShape&&);
+  S2LaxPolylineShape(S2LaxPolylineShape&& other);
 
-  // Move-assignment operator.
-  S2LaxPolylineShape& operator=(S2LaxPolylineShape&&);
+  S2LaxPolylineShape& operator=(S2LaxPolylineShape&& other);
 
   // Constructs an S2LaxPolylineShape with the given vertices.
   explicit S2LaxPolylineShape(absl::Span<const S2Point> vertices);
@@ -77,6 +82,9 @@ class S2LaxPolylineShape : public S2Shape {
   // Decodes an S2LaxPolylineShape, returning true on success.  (The method
   // name is chosen for compatibility with EncodedS2LaxPolylineShape below.)
   bool Init(Decoder* decoder);
+
+  // Populates an S2Error when Init fails.
+  bool Init(Decoder* decoder, S2Error& error);
 
   // S2Shape interface:
   int num_edges() const final { return std::max(0, num_vertices() - 1); }
@@ -111,7 +119,7 @@ class EncodedS2LaxPolylineShape : public S2Shape {
   enum : TypeTag { kTypeTag = S2LaxPolylineShape::kTypeTag };
 
   // Constructs an uninitialized object; requires Init() to be called.
-  EncodedS2LaxPolylineShape() {}
+  EncodedS2LaxPolylineShape() = default;
 
   // Initializes an EncodedS2LaxPolylineShape.
   //

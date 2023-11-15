@@ -15,21 +15,31 @@
 
 #include "s2/s2polyline_alignment.h"
 
+#include <cmath>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include "absl/memory/memory.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 
+#include "s2/s1angle.h"
 #include "s2/s2cap.h"
-#include "s2/s2loop.h"
+#include "s2/s2point.h"
+#include "s2/s2polyline.h"
 #include "s2/s2polyline_alignment_internal.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 
+using std::make_unique;
 using std::string;
+using std::unique_ptr;
+using std::vector;
 
 namespace s2polyline_alignment {
 
@@ -42,8 +52,7 @@ TEST(S2PolylineAlignmentTest, CreatesWindowFromStrides) {
   //  2 . . * * . .
   //  3 . . . * * *
   //  4 . . . . * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
   const Window w(strides);
   EXPECT_EQ(w.GetColumnStride(0).start, 0);
   EXPECT_EQ(w.GetColumnStride(0).end, 3);
@@ -74,7 +83,7 @@ TEST(S2PolylineAlignmentTest, CreatesWindowFromWarpPath) {
 }
 
 TEST(S2PolylineAlignmentTest, GeneratesWindowDebugString) {
-  const std::vector<ColumnStride> strides = {{0, 4}, {0, 4}, {0, 4}, {0, 4}};
+  const vector<ColumnStride> strides = {{0, 4}, {0, 4}, {0, 4}, {0, 4}};
   const Window w(strides);
   const string expected_output = R"(
  * * * *
@@ -92,8 +101,7 @@ TEST(S2PolylineAlignmentTest, UpsamplesWindowByFactorOfTwo) {
   // 2 . . * * . .
   // 3 . . . * * *
   // 4 . . . . * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
   const Window w(strides);
   const Window w_upscaled = w.Upsample(10, 12);
   const string expected_output = R"(
@@ -117,8 +125,7 @@ TEST(S2PolylineAlignmentTest, UpsamplesWindowXAxisByFactorOfThree) {
   // 1 . * * * . .
   // 2 . . * * . .  3 . . . * * *
   // 4 . . . . * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
   const Window w(strides);
   const Window w_upscaled = w.Upsample(5, 18);
   const string expected_output = R"(
@@ -138,8 +145,7 @@ TEST(S2PolylineAlignmentTest, UpsamplesWindowYAxisByFactorOfThree) {
   // 2 . . * * . .
   // 3 . . . * * *
   // 4 . . . . * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
   const Window w(strides);
   const Window w_upscaled = w.Upsample(15, 6);
   const string expected_output = R"(
@@ -169,8 +175,7 @@ TEST(S2PolylineAlignmentTest, UpsamplesWindowByNonInteger) {
   // 2 . . * * . .
   // 3 . . . * * *
   // 4 . . . . * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {1, 4}, {2, 4}, {3, 6}, {4, 6}};
   const Window w(strides);
 
   const Window w_upscaled = w.Upsample(19, 23);
@@ -205,8 +210,7 @@ TEST(S2PolylineAlignmentTest, DilatesWindowByRadiusZero) {
   // 2 . . * . . .
   // 3 . . * * . .
   // 4 . . . * * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
   const Window w(strides);
   const Window w_d = w.Dilate(0);
   const string expected_output = R"(
@@ -226,8 +230,7 @@ TEST(S2PolylineAlignmentTest, DilatesWindowByRadiusOne) {
   // 2 . x * x x .
   // 3 . x * * x x
   // 4 . x x * * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
   const Window w(strides);
   const Window w_d = w.Dilate(1);
   const string expected_output = R"(
@@ -247,8 +250,7 @@ TEST(S2PolylineAlignmentTest, DilatesWindowByRadiusTwo) {
   // 2 x x * x x x
   // 3 x x * * x x
   // 4 x x x * * *
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
   const Window w(strides);
   const Window w_d = w.Dilate(2);
   const string expected_output = R"(
@@ -261,8 +263,7 @@ TEST(S2PolylineAlignmentTest, DilatesWindowByRadiusTwo) {
   EXPECT_EQ("\n" + w_d.DebugString(), expected_output);
 }
 TEST(S2PolylineAlignmentTest, DilatesWindowByVeryLargeRadius) {
-  const std::vector<ColumnStride> strides = {
-      {0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
+  const vector<ColumnStride> strides = {{0, 3}, {2, 3}, {2, 3}, {2, 4}, {3, 6}};
   const Window w(strides);
   const Window w_d = w.Dilate(100);
   const string expected_output = R"(
@@ -301,10 +302,10 @@ TEST(S2PolylineAlignmentTest, HalvesOddLengthPolyline) {
 CostTable DistanceMatrix(const S2Polyline& a, const S2Polyline& b) {
   const int a_n = a.num_vertices();
   const int b_n = b.num_vertices();
-  auto table = CostTable(a_n, std::vector<double>(b_n));
+  auto table = CostTable(a_n, vector<double>(b_n));
   for (int i = 0; i < a_n; ++i) {
     for (int j = 0; j < b_n; ++j) {
-      table[i][j] = (a.vertex(i) - b.vertex(j)).Norm2();
+      table[i][j] = (a.vertex(i) - b.vertex(j)).Norm();
     }
   }
   return table;
@@ -344,7 +345,7 @@ void VerifyCost(const S2Polyline& a, const S2Polyline& b) {
 void VerifyPath(const S2Polyline& a, const S2Polyline& b, const WarpPath& p) {
   double correct = 0;
   for (const auto& pair : p) {
-    correct += (a.vertex(pair.first) - b.vertex(pair.second)).Norm2();
+    correct += (a.vertex(pair.first) - b.vertex(pair.second)).Norm();
   }
   const double exact_cost = GetExactVertexAlignmentCost(a, b);
   const VertexAlignment exact_alignment = GetExactVertexAlignment(a, b);
@@ -370,9 +371,9 @@ void VerifyPath(const S2Polyline& a, const S2Polyline& b, const WarpPath& p) {
 // one match (approximately 2*perturbation + 1) on average in the base loop. The
 // intent of this method is to provide a set of correlated testing lines for
 // benchmarks and fuzz tests.
-std::vector<std::unique_ptr<S2Polyline>> GenPolylines(
-    const int num_polylines, const int num_vertices,
-    const double perturbation) {
+vector<unique_ptr<S2Polyline>> GenPolylines(const int num_polylines,
+                                            const int num_vertices,
+                                            const double perturbation) {
   const auto kLoopRadius = S1Angle::Radians(0.01);
   const auto edge_length = 2 * M_PI * kLoopRadius / num_vertices;
   const auto perturbation_radius = perturbation * edge_length;
@@ -380,41 +381,43 @@ std::vector<std::unique_ptr<S2Polyline>> GenPolylines(
   const auto loop =
       S2Testing::MakeRegularPoints(center, kLoopRadius, num_vertices);
 
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.reserve(num_polylines);
 
   for (int i = 0; i < num_polylines; ++i) {
-    std::vector<S2Point> pts;
+    vector<S2Point> pts;
     pts.reserve(num_vertices);
     for (int j = 0; j < num_vertices; ++j) {
       pts.push_back(
           S2Testing::SamplePoint(S2Cap(loop[j], perturbation_radius)));
     }
-    polylines.push_back(absl::make_unique<S2Polyline>(pts));
+    polylines.push_back(make_unique<S2Polyline>(pts));
   }
   return polylines;
 }
 
-TEST(S2PolylineAlignmentTest, ExactLengthZeroInputs) {
+#if GTEST_HAS_DEATH_TEST
+TEST(S2PolylineAlignmentDeathTest, ExactLengthZeroInputs) {
   const auto a = s2textformat::MakePolylineOrDie("");
   const auto b = s2textformat::MakePolylineOrDie("");
   const WarpPath correct_path = {};
   EXPECT_DEATH(VerifyPath(*a, *b, correct_path), "");
 }
 
-TEST(S2PolylineAlignmentTest, ExactLengthZeroInputA) {
+TEST(S2PolylineAlignmentDeathTest, ExactLengthZeroInputA) {
   const auto a = s2textformat::MakePolylineOrDie("");
   const auto b = s2textformat::MakePolylineOrDie("0:0, 1:1, 2:2");
   const WarpPath correct_path = {};
   EXPECT_DEATH(VerifyPath(*a, *b, correct_path), "");
 }
 
-TEST(S2PolylineAlignmentTest, ExactLengthZeroInputB) {
+TEST(S2PolylineAlignmentDeathTest, ExactLengthZeroInputB) {
   const auto a = s2textformat::MakePolylineOrDie("0:0, 1:1, 2:2");
   const auto b = s2textformat::MakePolylineOrDie("");
   const WarpPath correct_path = {};
   EXPECT_DEATH(VerifyPath(*a, *b, correct_path), "");
 }
+#endif
 
 TEST(S2PolylineAlignmentTest, ExactLengthOneInputs) {
   const auto a = s2textformat::MakePolylineOrDie("1:1");
@@ -448,6 +451,27 @@ TEST(S2PolylineAlignmentTest, ExactHeaderFileExample) {
   VerifyCost(*a, *b);
 }
 
+TEST(S2PolylineAlignmentTest, DifferentPathForDistanceVersusSquaredDistance) {
+  // Tests that we get the correct path in the case where we have polylines at
+  // right angles, that would get a different matching of points for distance
+  // cost versus squared distance cost. If we had used squared distance for the
+  // cost the path would be {{0, 0}, {1, 0}, {2, 0}, {3, 1}, {3, 2}}; See
+  // https://screenshot.googleplex.com/7eeMjdSc5HeSeTD for the costs between the
+  // different pairs for distance and squared distance
+  //
+  // A0---A1---A2
+  // B0       |
+  // |        A3
+  // B1-------B2
+  const auto a =
+      s2textformat::MakePolylineOrDie("0.1:-0.1, 0.1:0, 0.1:0.1, -0.1:0.1");
+  const auto b =
+      s2textformat::MakePolylineOrDie("0.1:-0.1, -0.1:-0.1, -0.1:0.1");
+  const WarpPath correct_path = {{0, 0}, {1, 0}, {2, 1}, {3, 2}};
+  VerifyPath(*a, *b, correct_path);
+  VerifyCost(*a, *b);
+}
+
 // Take a small random selection of short correlated polylines and ensure that
 // the cost from the brute force solver equals the cost from the DP solvers.
 TEST(S2PolylineAlignmentTest, FuzzedWithBruteForce) {
@@ -465,14 +489,16 @@ TEST(S2PolylineAlignmentTest, FuzzedWithBruteForce) {
 // TESTS FOR TRAJECTORY CONSENSUS ALGORITHMS
 
 // Tests for GetMedoidPolyline
-TEST(S2PolylineAlignmentTest, MedoidPolylineNoPolylines) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+#if GTEST_HAS_DEATH_TEST
+TEST(S2PolylineAlignmentDeathTest, MedoidPolylineNoPolylines) {
+  vector<unique_ptr<S2Polyline>> polylines;
   const MedoidOptions default_opts;
   EXPECT_DEATH(GetMedoidPolyline(polylines, default_opts), "");
 }
+#endif
 
 TEST(S2PolylineAlignmentTest, MedoidPolylineOnePolyline) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("5:0, 5:1, 5:2"));
   const MedoidOptions default_opts;
   const auto medoid = GetMedoidPolyline(polylines, default_opts);
@@ -482,7 +508,7 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineOnePolyline) {
 TEST(S2PolylineAlignmentTest, MedoidPolylineTwoPolylines) {
   // Tie-breaking is contractually done by choosing the smallest tied index.
   // These inputs (really, any collection of two polylines) yield a tie.
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("5:0, 5:1, 5:2"));
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
 
@@ -492,7 +518,7 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineTwoPolylines) {
 }
 
 TEST(S2PolylineAlignmentTest, MedoidPolylineFewSmallPolylines) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("5:0, 5:1, 5:2"));
   polylines.emplace_back(s2textformat::MakePolylineOrDie("3:0, 3:1, 3:2"));
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
@@ -504,7 +530,7 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineFewSmallPolylines) {
 
 TEST(S2PolylineAlignmentTest, MedoidPolylineOverlappingPolylines) {
   // Given two identical polylines as input, break the tie with smallest index.
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
 
@@ -514,7 +540,7 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineOverlappingPolylines) {
 }
 
 TEST(S2PolylineAlignmentTest, MedoidPolylineDifferentLengthPolylines) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("5:0, 5:1, 5:2"));
   polylines.emplace_back(
       s2textformat::MakePolylineOrDie("3:0, 3:0.5, 3:1, 3:2"));
@@ -535,7 +561,7 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineFewLargePolylines) {
   const auto polylines = GenPolylines(num_polylines, num_vertices, perturb);
 
   // clang-format off
-  const std::vector<double> exact_costs = {
+  const vector<double> exact_costs = {
       GetExactVertexAlignmentCost(*polylines[0], *polylines[1]) +
       GetExactVertexAlignmentCost(*polylines[0], *polylines[2]),
       GetExactVertexAlignmentCost(*polylines[1], *polylines[0]) +
@@ -543,7 +569,7 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineFewLargePolylines) {
       GetExactVertexAlignmentCost(*polylines[2], *polylines[0]) +
       GetExactVertexAlignmentCost(*polylines[2], *polylines[1])
   };
-  const std::vector<double> approx_costs = {
+  const vector<double> approx_costs = {
       GetApproxVertexAlignment(*polylines[0], *polylines[1]).alignment_cost +
       GetApproxVertexAlignment(*polylines[0], *polylines[2]).alignment_cost,
       GetApproxVertexAlignment(*polylines[1], *polylines[0]).alignment_cost +
@@ -572,14 +598,16 @@ TEST(S2PolylineAlignmentTest, MedoidPolylineFewLargePolylines) {
 }
 
 // Tests for GetConsensusPolyline
-TEST(S2PolylineAlignmentTest, ConsensusPolylineNoPolylines) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+#if GTEST_HAS_DEATH_TEST
+TEST(S2PolylineAlignmentDeathTest, ConsensusPolylineNoPolylines) {
+  vector<unique_ptr<S2Polyline>> polylines;
   const ConsensusOptions default_opts;
   EXPECT_DEATH(GetConsensusPolyline(polylines, default_opts), "");
 }
+#endif
 
 TEST(S2PolylineAlignmentTest, ConsensusPolylineOnePolyline) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("3:0, 3:1, 3:2"));
 
   const ConsensusOptions default_opts;
@@ -589,7 +617,7 @@ TEST(S2PolylineAlignmentTest, ConsensusPolylineOnePolyline) {
 }
 
 TEST(S2PolylineAlignmentTest, ConsensusPolylineTwoPolylines) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("3:0, 3:1, 3:2"));
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
 
@@ -600,7 +628,7 @@ TEST(S2PolylineAlignmentTest, ConsensusPolylineTwoPolylines) {
 }
 
 TEST(S2PolylineAlignmentTest, ConsensusPolylineOverlappingPolylines) {
-  std::vector<std::unique_ptr<S2Polyline>> polylines;
+  vector<unique_ptr<S2Polyline>> polylines;
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
   polylines.emplace_back(s2textformat::MakePolylineOrDie("1:0, 1:1, 1:2"));
 

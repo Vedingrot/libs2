@@ -17,35 +17,47 @@
 
 #include "s2/s2closest_edge_query.h"
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
-
+#include "s2/base/commandlineflags.h"
 #include "s2/encoded_s2shape_index.h"
 #include "s2/mutable_s2shape_index.h"
 #include "s2/s1angle.h"
+#include "s2/s1chord_angle.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
 #include "s2/s2cell_id.h"
+#include "s2/s2closest_edge_query_base.h"
 #include "s2/s2closest_edge_query_testing.h"
 #include "s2/s2edge_distances.h"
+#include "s2/s2latlng.h"
 #include "s2/s2loop.h"
 #include "s2/s2metrics.h"
+#include "s2/s2min_distance_targets.h"
+#include "s2/s2point.h"
 #include "s2/s2point_vector_shape.h"
+#include "s2/s2pointutil.h"
 #include "s2/s2polygon.h"
 #include "s2/s2predicates.h"
+#include "s2/s2shape.h"
 #include "s2/s2shapeutil_coding.h"
+#include "s2/s2shapeutil_count_edges.h"
+#include "s2/s2shapeutil_shape_edge_id.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
+#include "s2/util/coding/coder.h"
 
-using absl::make_unique;
 using s2shapeutil::ShapeEdgeId;
 using s2textformat::MakeIndexOrDie;
 using s2textformat::MakePointOrDie;
+using std::make_unique;
 using std::min;
 using std::pair;
 using std::string;
@@ -84,6 +96,24 @@ TEST(S2ClosestEdgeQuery, OptionsNotModified) {
   EXPECT_EQ(options.max_results(), query.options().max_results());
   EXPECT_EQ(options.max_distance(), query.options().max_distance());
   EXPECT_EQ(options.max_error(), query.options().max_error());
+}
+
+TEST(S2ClosestEdgeQuery, OptionsS1AngleSetters) {
+  // Verify that the S1Angle and S1ChordAngle versions do the same thing.
+  // This is mainly to prevent the (so far unused) S1Angle versions from
+  // being detected as dead code.
+  S2ClosestEdgeQuery::Options angle_options, chord_angle_options;
+  angle_options.set_max_distance(S1Angle::Degrees(1));
+  chord_angle_options.set_max_distance(S1ChordAngle::Degrees(1));
+  EXPECT_EQ(chord_angle_options.max_distance(), angle_options.max_distance());
+
+  angle_options.set_inclusive_max_distance(S1Angle::Degrees(1));
+  chord_angle_options.set_inclusive_max_distance(S1ChordAngle::Degrees(1));
+  EXPECT_EQ(chord_angle_options.max_distance(), angle_options.max_distance());
+
+  angle_options.set_conservative_max_distance(S1Angle::Degrees(1));
+  chord_angle_options.set_conservative_max_distance(S1ChordAngle::Degrees(1));
+  EXPECT_EQ(chord_angle_options.max_distance(), angle_options.max_distance());
 }
 
 TEST(S2ClosestEdgeQuery, DistanceEqualToLimit) {
@@ -191,12 +221,26 @@ TEST(S2ClosestEdgeQuery, TargetPolygonContainingIndexedPoints) {
   target.set_include_interiors(true);
   auto results = query.FindClosestEdges(&target);
   ASSERT_EQ(2, results.size());
+
   EXPECT_EQ(S1ChordAngle::Zero(), results[0].distance());
   EXPECT_EQ(0, results[0].shape_id());
   EXPECT_EQ(2, results[0].edge_id());  // 1:11
+  EXPECT_FALSE(results[0].is_interior());
+  S2Shape::Edge e0 = query.GetEdge(results[0]);
+  EXPECT_TRUE(S2::ApproxEquals(e0.v0, S2LatLng::FromDegrees(1, 11).ToPoint()))
+      << S2LatLng(e0.v0);
+  EXPECT_TRUE(S2::ApproxEquals(e0.v1, S2LatLng::FromDegrees(1, 11).ToPoint()))
+      << S2LatLng(e0.v1);
+
   EXPECT_EQ(S1ChordAngle::Zero(), results[1].distance());
   EXPECT_EQ(0, results[1].shape_id());
   EXPECT_EQ(3, results[1].edge_id());  // 3:13
+  EXPECT_FALSE(results[1].is_interior());
+  S2Shape::Edge e1 = query.GetEdge(results[1]);
+  EXPECT_TRUE(S2::ApproxEquals(e1.v0, S2LatLng::FromDegrees(3, 13).ToPoint()))
+      << S2LatLng(e1.v0);
+  EXPECT_TRUE(S2::ApproxEquals(e1.v1, S2LatLng::FromDegrees(3, 13).ToPoint()))
+      << S2LatLng(e1.v1);
 }
 
 TEST(S2ClosestEdgeQuery, EmptyTargetOptimized) {

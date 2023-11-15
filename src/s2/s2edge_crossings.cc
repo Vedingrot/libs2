@@ -16,30 +16,35 @@
 // Author: ericv@google.com (Eric Veach)
 
 #include "s2/s2edge_crossings.h"
-#include "s2/s2edge_crossings_internal.h"
 
+#include <algorithm>
 #include <cmath>
-#include <cmath>
+#include <limits>
+#include <utility>
 
-#include "s2/base/logging.h"
+#include "absl/strings/string_view.h"
 #include "s2/s1angle.h"
 #include "s2/s2edge_crosser.h"
+#include "s2/s2edge_crossings_internal.h"
+#include "s2/s2point.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2predicates.h"
+#include "s2/s2predicates_internal.h"
 #include "s2/util/math/exactfloat/exactfloat.h"
 
 namespace S2 {
 
+using absl::string_view;
 using internal::GetIntersectionExact;
-using internal::IntersectionMethod;
 using internal::intersection_method_tally_;
+using internal::IntersectionMethod;
 using S2::internal::GetStableCrossProd;
 using s2pred::DBL_ERR;
-using s2pred::ToLD;
-using s2pred::ToExact;
 using s2pred::kHasLongDouble;
 using s2pred::kSqrt3;
 using s2pred::rounding_epsilon;
+using s2pred::ToExact;
+using s2pred::ToLD;
 using std::fabs;
 using std::max;
 using std::sqrt;
@@ -68,7 +73,7 @@ const S1Angle kIntersectionExactError = S1Angle::Radians(2 * DBL_ERR);
 
 int* intersection_method_tally_ = nullptr;
 
-const char* GetIntersectionMethodName(IntersectionMethod method) {
+string_view GetIntersectionMethodName(IntersectionMethod method) {
   switch (method) {
     case IntersectionMethod::SIMPLE:    return "Simple";
     case IntersectionMethod::SIMPLE_LD: return "Simple_ld";
@@ -122,13 +127,13 @@ inline bool GetStableCrossProd(const Vector3<T>& a, const Vector3<T>& b,
 // Explicitly instantiate this function so that we can use it in tests without
 // putting its definition in a header file.
 template bool GetStableCrossProd<double>(
-    const S2Point&, const S2Point&, S2Point*);
+  const Vector3_d&, const Vector3_d&, Vector3_d*);
 template bool GetStableCrossProd<long double>(
     const Vector3_ld&, const Vector3_ld&, Vector3_ld*);
 
 }  // namespace internal
 
-Vector3_d RobustCrossProd(const S2Point& a, const S2Point& b) {
+S2Point RobustCrossProd(const S2Point& a, const S2Point& b) {
   S2_DCHECK(IsUnitLength(a));
   S2_DCHECK(IsUnitLength(b));
 
@@ -368,7 +373,7 @@ bool VertexCrossing(const S2Point& a, const S2Point& b,
   if (a == d) return (b == c) || s2pred::OrderedCCW(S2::RefDir(a), c, b, a);
   if (b == c) return s2pred::OrderedCCW(S2::RefDir(b), d, a, b);
 
-  S2_LOG(DFATAL) << "VertexCrossing called with 4 distinct vertices";
+  S2_LOG(ERROR) << "VertexCrossing called with 4 distinct vertices";
   return false;
 }
 
@@ -389,7 +394,7 @@ int SignedVertexCrossing(const S2Point& a, const S2Point& b,
   }
   if (b == c) return s2pred::OrderedCCW(S2::RefDir(b), d, a, b) ? -1 : 0;
 
-  S2_LOG(DFATAL) << "SignedVertexCrossing called with 4 distinct vertices";
+  S2_LOG(ERROR) << "SignedVertexCrossing called with 4 distinct vertices";
   return false;
 }
 

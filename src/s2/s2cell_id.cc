@@ -20,27 +20,35 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
-#include <cstring>
-#include <iosfwd>
-#include <mutex>
+#include <cstddef>
+#include <ostream>
+#include <string>
 #include <vector>
 
 #include "absl/base/call_once.h"
 #include "absl/base/casts.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 
 #include "s2/base/integral_types.h"
-#include "s2/base/logging.h"
 #include "s2/util/bits/bits.h"
+#include "s2/util/coding/coder.h"
 #include "s2/r1interval.h"
+#include "s2/r2.h"
+#include "s2/r2rect.h"
+#include "s2/s1angle.h"
 #include "s2/s2coords.h"
+#include "s2/s2coords_internal.h"
+#include "s2/s2error.h"
 #include "s2/s2latlng.h"
+#include "s2/s2point.h"
 
 using absl::StrCat;
-using S2::internal::kSwapMask;
+using absl::string_view;
 using S2::internal::kInvertMask;
 using S2::internal::kPosToIJ;
 using S2::internal::kPosToOrientation;
+using S2::internal::kSwapMask;
 using std::fabs;
 using std::max;
 using std::min;
@@ -223,10 +231,12 @@ string S2CellId::ToToken() const {
   return HexFormatString(id_ >> (4 * num_zero_digits), 16 - num_zero_digits);
 }
 
-S2CellId S2CellId::FromToken(const absl::string_view token) {
+S2CellId S2CellId::FromToken(const string_view token) {
   if (token.length() > 16) return S2CellId::None();
   uint64 id = 0;
-  for (int i = 0, pos = 60; i < token.length(); ++i, pos -= 4) {
+  // Use size_t to fix signed/unsigned comparison for client that use `-Wextra`
+  // (e.g. Chrome).
+  for (size_t i = 0, pos = 60; i < token.length(); ++i, pos -= 4) {
     uint64 d;
     if ('0' <= token[i] && token[i] <= '9') {
       d = token[i] - '0';
@@ -437,10 +447,19 @@ R2Rect S2CellId::ExpandedByDistanceUV(const R2Rect& uv, S1Angle distance) {
   double max_u = max(fabs(u0), fabs(u1));
   double max_v = max(fabs(v0), fabs(v1));
   double sin_dist = sin(distance);
-  return R2Rect(R1Interval(ExpandEndpoint(u0, max_v, -sin_dist),
-                           ExpandEndpoint(u1, max_v, sin_dist)),
-                R1Interval(ExpandEndpoint(v0, max_u, -sin_dist),
-                           ExpandEndpoint(v1, max_u, sin_dist)));
+
+  R1Interval xinterv = R1Interval(ExpandEndpoint(u0, max_v, -sin_dist),
+                                  ExpandEndpoint(u1, max_v, sin_dist));
+  R1Interval yinterv = R1Interval(ExpandEndpoint(v0, max_u, -sin_dist),
+                                  ExpandEndpoint(v1, max_u, sin_dist));
+
+  // R2Rect requires both or neither dimension be empty, so if we shrank the
+  // rectangle too much, manually collapse to a degenerate rectangle at the
+  // first corner.
+  if (xinterv.is_empty() || yinterv.is_empty()) {
+    return R2Rect(R1Interval(u0, u0), R1Interval(v0, v0));
+  }
+  return R2Rect(xinterv, yinterv);
 }
 
 S2CellId S2CellId::FromFaceIJWrap(int face, int i, int j) {
@@ -602,7 +621,7 @@ std::ostream& operator<<(std::ostream& os, S2CellId id) {
   return os << id.ToString();
 }
 
-S2CellId S2CellId::FromDebugString(absl::string_view str) {
+S2CellId S2CellId::FromDebugString(string_view str) {
   // This function is reasonably efficient, but is only intended for use in
   // tests.
   int level = static_cast<int>(str.size() - 2);
@@ -610,10 +629,47 @@ S2CellId S2CellId::FromDebugString(absl::string_view str) {
   int face = str[0] - '0';
   if (face < 0 || face > 5 || str[1] != '/') return S2CellId::None();
   S2CellId id = S2CellId::FromFace(face);
-  for (int i = 2; i < str.size(); ++i) {
+  // Use size_t to fix signed/unsigned comparison for client that use `-Wextra`
+  // (e.g. Chrome).
+  for (size_t i = 2; i < str.size(); ++i) {
     int child_pos = str[i] - '0';
     if (child_pos < 0 || child_pos > 3) return S2CellId::None();
     id = id.child(child_pos);
   }
   return id;
+}
+
+void S2CellId::Coder::Encode(Encoder& encoder, const S2CellId& v) const {
+  string token = v.ToToken();
+  // Ensure enough space for the token plus 1 nul byte appended by
+  // Encoder::puts.
+  encoder.Ensure(token.length() + 1);
+  encoder.puts(token.c_str());
+}
+
+bool S2CellId::Coder::Decode(Decoder& decoder, S2CellId& v,
+                             S2Error& error) const {
+  // The longest S2CellId representation is 16 bytes, plus one more for the nul
+  // terminator.
+  char bytes[17];
+
+  const size_t start_pos = decoder.pos();
+  decoder.getcn(bytes, '\0', std::min(decoder.avail(), sizeof(bytes)));
+  const size_t bytes_read = decoder.pos() - start_pos;
+
+  // The token must be nul-terminated.
+  if (bytes_read == 0 || bytes[bytes_read - 1] != '\0') {
+    error.Init(S2Error::DATA_LOSS, "Unknown decoding error");
+    return false;
+  }
+
+  const string_view token(bytes, bytes_read - 1);
+  v = S2CellId::FromToken(token);
+  // Prevent edge cases where S2CellId::FromToken returns S2CellId::None for
+  // an invalid token.
+  if (v == S2CellId::None() && token != "X") {
+    error.Init(S2Error::DATA_LOSS, "Unknown decoding error");
+    return false;
+  }
+  return true;
 }

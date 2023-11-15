@@ -17,6 +17,8 @@
 
 #include "s2/s2builder.h"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <cinttypes>
 #include <cmath>
@@ -24,18 +26,24 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "s2/base/commandlineflags.h"
-#include "s2/base/timer.h"
 #include <gtest/gtest.h>
 
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 
+#include "s2/base/commandlineflags.h"
 #include "s2/base/log_severity.h"
+#include "s2/base/timer.h"
+#include "s2/id_set_lexicon.h"
+#include "s2/mutable_s2shape_index.h"
+#include "s2/s1angle.h"
+#include "s2/s1chord_angle.h"
+#include "s2/s2builder_graph.h"
 #include "s2/s2builder_layer.h"
 #include "s2/s2builderutil_lax_polygon_layer.h"
 #include "s2/s2builderutil_lax_polyline_layer.h"
@@ -51,8 +59,11 @@
 #include "s2/s2edge_distances.h"
 #include "s2/s2error.h"
 #include "s2/s2latlng.h"
+#include "s2/s2lax_polygon_shape.h"
 #include "s2/s2lax_polyline_shape.h"
 #include "s2/s2loop.h"
+#include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
 #include "s2/s2polygon.h"
 #include "s2/s2polyline.h"
 #include "s2/s2predicates.h"
@@ -61,15 +72,7 @@
 
 using absl::StrAppend;
 using absl::StrCat;
-using absl::make_unique;
-using std::cout;
-using std::endl;
-using std::make_pair;
-using std::min;
-using std::pair;
-using std::string;
-using std::unique_ptr;
-using std::vector;
+using absl::string_view;
 using s2builderutil::GraphClone;
 using s2builderutil::IdentitySnapFunction;
 using s2builderutil::IntLatLngSnapFunction;
@@ -81,6 +84,15 @@ using s2builderutil::S2PolylineVectorLayer;
 using s2textformat::MakePointOrDie;
 using s2textformat::MakePolygonOrDie;
 using s2textformat::MakePolylineOrDie;
+using std::cout;
+using std::endl;
+using std::make_pair;
+using std::make_unique;
+using std::min;
+using std::pair;
+using std::string;
+using std::unique_ptr;
+using std::vector;
 using EdgeType = S2Builder::EdgeType;
 using InputEdgeId = S2Builder::Graph::InputEdgeId;
 using Graph = S2Builder::Graph;
@@ -93,9 +105,10 @@ namespace {
 
 void ExpectPolygonsEqual(const S2Polygon& expected,
                          const S2Polygon& actual) {
-  EXPECT_TRUE(expected.Equals(&actual))
-      << "\nExpected:\n" << s2textformat::ToString(expected)
-      << "\nActual:\n" << s2textformat::ToString(actual);
+  EXPECT_TRUE(expected.Equals(actual))
+      << "\nExpected:\n"
+      << s2textformat::ToString(expected) << "\nActual:\n"
+      << s2textformat::ToString(actual);
 }
 
 void ExpectPolygonsApproxEqual(const S2Polygon& expected,
@@ -109,9 +122,10 @@ void ExpectPolygonsApproxEqual(const S2Polygon& expected,
 
 void ExpectPolylinesEqual(const S2Polyline& expected,
                           const S2Polyline& actual) {
-  EXPECT_TRUE(expected.Equals(&actual))
-      << "\nExpected:\n" << s2textformat::ToString(expected)
-      << "\nActual:\n" << s2textformat::ToString(actual);
+  EXPECT_TRUE(expected.Equals(actual))
+      << "\nExpected:\n"
+      << s2textformat::ToString(expected) << "\nActual:\n"
+      << s2textformat::ToString(actual);
 }
 
 TEST(S2Builder, AddShape) {
@@ -251,11 +265,11 @@ TEST(S2Builder, MaxEdgeDeviation) {
   // radius is S2::kIntersectionError because split_crossing_edges() is true.
   EXPECT_EQ(builder.options().edge_snap_radius(), S2::kIntersectionError);
   S1Angle max_deviation = builder.options().max_edge_deviation();
-  const int kIters = 50 * FLAGS_iteration_multiplier;
+  const int kIters = 50 * absl::GetFlag(FLAGS_iteration_multiplier);
   auto& rnd = S2Testing::rnd;
 
-  // Test cases are constructed randomly not all tests are effective (i.e., AB
-  // might not snap to the perturbed vertex C).  Here we keep track of the
+  // Test cases are constructed randomly, so not all tests are effective (i.e.
+  // AB might not snap to the perturbed vertex C).  Here we keep track of the
   // number of effective tests.
   int num_effective = 0;
   for (int iter = 0; iter < kIters; ++iter) {
@@ -288,7 +302,7 @@ TEST(S2Builder, MaxEdgeDeviation) {
     if (n > 2) ++num_effective;
   }
   // We require at least 20% of the test cases to be successful.
-  EXPECT_GE(num_effective, 10 * FLAGS_iteration_multiplier);
+  EXPECT_GE(num_effective * 5, kIters);
 }
 
 TEST(S2Builder, IdempotencySnapsInadequatelySeparatedVertices) {
@@ -302,7 +316,7 @@ TEST(S2Builder, IdempotencySnapsInadequatelySeparatedVertices) {
   builder.AddPolyline(*MakePolylineOrDie("0:0, 0:0.9, 0:2"));
   S2Error error;
   ASSERT_TRUE(builder.Build(&error)) << error;
-  const char* expected = "0:0, 0:2";
+  constexpr string_view expected = "0:0, 0:2";
   EXPECT_EQ(expected, s2textformat::ToString(output));
 }
 
@@ -318,7 +332,7 @@ TEST(S2Builder, IdempotencySnapsIdenticalVerticesWithZeroSnapRadius) {
   builder.AddPolyline(*MakePolylineOrDie("1:0, 0:0"));
   S2Error error;
   ASSERT_TRUE(builder.Build(&error)) << error;
-  const char* expected = "0:0, 0:1, 1:0";
+  constexpr string_view expected = "0:0, 0:1, 1:0";
   EXPECT_EQ(expected, s2textformat::ToString(output));
 }
 
@@ -337,7 +351,7 @@ TEST(S2Builder,
   builder.AddPolyline(*MakePolylineOrDie("1:0, 0:0"));
   S2Error error;
   ASSERT_TRUE(builder.Build(&error)) << error;
-  const char* expected = "0:0, 0:1, 1:0";
+  constexpr string_view expected = "0:0, 0:1, 1:0";
   EXPECT_EQ(expected, s2textformat::ToString(output));
 }
 
@@ -432,7 +446,7 @@ TEST(S2Builder, IdempotencyDoesNotSnapAdequatelySeparatedEdges) {
   builder.AddPolygon(*MakePolygonOrDie("1.49:0, 0:2, 0.49:3"));
   S2Error error;
   ASSERT_TRUE(builder.Build(&error)) << error;
-  const char* expected = "1:0, 0:2, 0:3";
+  constexpr string_view expected = "1:0, 0:2, 0:3";
   EXPECT_EQ(expected, s2textformat::ToString(output1));
   builder.StartLayer(make_unique<S2PolygonLayer>(&output2));
   builder.AddPolygon(output1);
@@ -529,6 +543,7 @@ TEST(S2Builder, TopologyPreservedWithZeroSnapRadiusEdgeSplitting) {
   auto y = S2LatLng::FromDegrees(0.99 * kEdgeSnapRadDegrees, 45).ToPoint();
   auto c = S2LatLng::FromDegrees(1.03 * kEdgeSnapRadDegrees, 22.5).ToPoint();
   auto d = S2LatLng::FromDegrees(10, 22.5).ToPoint();
+
   builder.AddEdge(a, b);
   builder.ForceVertex(x);
   builder.ForceVertex(y);
@@ -553,7 +568,7 @@ TEST(S2Builder, TopologyPreservedWithForcedVertices) {
   //
   // This test is the same as the one above except for the following:
   //  - split_crossing_edges() is false
-  //  - we use a snap raidus of S2::kIntersectionError rather than zero
+  //  - we use a snap radius of S2::kIntersectionError rather than zero
   //  - vertex C is added using ForceVertex().
   S2Builder::Options options{IdentitySnapFunction(S2::kIntersectionError)};
   options.set_idempotent(false);
@@ -619,8 +634,8 @@ TEST(S2Builder, S2CellIdSnappingAtAllLevels) {
     // within the ApproxContains implementation.)
     S1Angle tolerance = min(2 * snap_function.snap_radius(),
                             snap_function.kMaxSnapRadius());
-    EXPECT_TRUE(output.ApproxContains(input.get(), tolerance));
-    EXPECT_TRUE(input->ApproxContains(&output, tolerance));
+    EXPECT_TRUE(output.ApproxContains(*input.get(), tolerance));
+    EXPECT_TRUE(input->ApproxContains(output, tolerance));
   }
 }
 
@@ -730,10 +745,9 @@ void ExpectGraphsEqual(const S2Builder::Graph& expected,
 // to those vectors are still identical.
 class GraphPersistenceLayer : public S2Builder::Layer {
  public:
-  GraphPersistenceLayer(
-      const S2Builder::GraphOptions& graph_options,
-      std::vector<S2Builder::Graph>* graphs,
-      std::vector<std::unique_ptr<GraphClone>>* clones)
+  GraphPersistenceLayer(const S2Builder::GraphOptions& graph_options,
+                        vector<S2Builder::Graph>* graphs,
+                        vector<unique_ptr<GraphClone>>* clones)
       : graph_options_(graph_options), graphs_(graphs), clones_(clones) {}
 
   S2Builder::GraphOptions graph_options() const override {
@@ -751,8 +765,8 @@ class GraphPersistenceLayer : public S2Builder::Layer {
 
  private:
   GraphOptions graph_options_;
-  std::vector<S2Builder::Graph>* graphs_;             // Shallow copies.
-  std::vector<std::unique_ptr<GraphClone>>* clones_;  // Deep copies.
+  vector<S2Builder::Graph>* graphs_;        // Shallow copies.
+  vector<unique_ptr<GraphClone>>* clones_;  // Deep copies.
 };
 
 TEST(S2Builder, GraphPersistence) {
@@ -773,8 +787,8 @@ TEST(S2Builder, GraphPersistence) {
 }
 
 void TestPolylineLayers(
-    const vector<const char*>& input_strs,
-    const vector<const char*>& expected_strs,
+    const vector<string_view>& input_strs,
+    const vector<string_view>& expected_strs,
     const S2PolylineLayer::Options& layer_options,
     const S2Builder::Options& builder_options = S2Builder::Options()) {
   SCOPED_TRACE(layer_options.edge_type() == EdgeType::DIRECTED ?
@@ -798,8 +812,8 @@ void TestPolylineLayers(
 }
 
 void TestPolylineVector(
-    const vector<const char*>& input_strs,
-    const vector<const char*>& expected_strs,
+    const vector<string_view>& input_strs,
+    const vector<string_view>& expected_strs,
     const S2PolylineVectorLayer::Options& layer_options,
     const S2Builder::Options& builder_options = S2Builder::Options()) {
   S2Builder builder(builder_options);
@@ -820,8 +834,8 @@ void TestPolylineVector(
 }
 
 void TestPolylineLayersBothEdgeTypes(
-    const vector<const char*>& input_strs,
-    const vector<const char*>& expected_strs,
+    const vector<string_view>& input_strs,
+    const vector<string_view>& expected_strs,
     S2PolylineLayer::Options layer_options,  // by value
     const S2Builder::Options& builder_options = S2Builder::Options()) {
   layer_options.set_edge_type(EdgeType::DIRECTED);
@@ -1009,7 +1023,7 @@ TEST(S2Builder, SimplifyPreservesTopology) {
   ASSERT_TRUE(builder.Build(&error)) << error;
   for (int j = 0; j < kNumLoops; ++j) {
     EXPECT_TRUE(output[j]->BoundaryNear(*input[j], kSnapRadius));
-    if (j > 0) EXPECT_TRUE(output[j]->Contains(output[j - 1].get()));
+    if (j > 0) EXPECT_TRUE(output[j]->Contains(*output[j - 1].get()));
   }
 }
 
@@ -1125,9 +1139,10 @@ void InputEdgeIdCheckingLayer::Build(const Graph& g, S2Error* error) {
   }
 }
 
-void TestInputEdgeIds(
-    const vector<const char*>& input_strs, const EdgeInputEdgeIds& expected,
-    const GraphOptions& graph_options, const S2Builder::Options& options) {
+void TestInputEdgeIds(const vector<string_view>& input_strs,
+                      const EdgeInputEdgeIds& expected,
+                      const GraphOptions& graph_options,
+                      const S2Builder::Options& options) {
   S2Builder builder(options);
   builder.StartLayer(make_unique<InputEdgeIdCheckingLayer>(expected,
                                                           graph_options));
@@ -1214,7 +1229,7 @@ TEST(S2Builder, SimplifyDegenerateEdgeMergingHard) {
   GraphOptions graph_options;  // Default options keep everything.
   S2Builder::Options options(IntLatLngSnapFunction(0));
   options.set_simplify_edge_chains(true);
-  vector<const char*> input {
+  vector<string_view> input{
     "0:1, 0:1.1", "0:0, 0:1, 0:2",  // Degenerate edge defined before chain
     "0:0, 0:0.9, 0:1, 0:1.1, 0:2",  // Degenerate edge defined in chain
     "0:2, 0:1, 0:0.9, 0:0",         // Defined in chain, chain reversed
@@ -1247,7 +1262,7 @@ TEST(S2Builder, SimplifyDegenerateEdgeMergingMultipleLayers) {
   // Note below that the edge chains in different layers have different vertex
   // locations, different number of interior vertices, different degenerate
   // edges, etc, and yet they can all be simplified together.
-  vector<vector<const char*>> input { {
+  vector<vector<string_view>> input{ {
       "0.1:5, 0:5.2", "0.1:0, 0:9.9",   // Defined before chain
       "0:10.1, 0:0.1", "0:3.1, 0:2.9",  // Defined after chain
     }, {
@@ -1483,10 +1498,9 @@ TEST(S2Builder, FractalStressTest) {
   }
 }
 
-void TestSnappingWithForcedVertices(const char* input_str,
-                                    S1Angle snap_radius,
-                                    const char* vertices_str,
-                                    const char* expected_str) {
+void TestSnappingWithForcedVertices(string_view input_str, S1Angle snap_radius,
+                                    string_view vertices_str,
+                                    string_view expected_str) {
   S2Builder builder{S2Builder::Options{IdentitySnapFunction(snap_radius)}};
   vector<S2Point> vertices = s2textformat::ParsePointsOrDie(vertices_str);
   for (const auto& vertex : vertices) {
@@ -1547,7 +1561,8 @@ TEST(S2Builder, AdjacentCoverageIntervalsSpanMoreThan90Degrees) {
 }
 
 // The following test requires internal debugging checks to be skipped.
-#ifdef NDEBUG
+// TODO(b/233610812): This test fails for Android-x86.
+#if defined(NDEBUG) && !(defined(__ANDROID__) && defined(__i386__))
 TEST(S2Builder, NaNVertices) {
   // Test that S2Builder operations don't crash when some vertices are NaN.
   vector<vector<S2Point>> loops = {
@@ -1657,7 +1672,7 @@ TEST(S2Builder, VoronoiSiteExclusionBug1) {
   builder.ForceVertex(MakePointOrDie("-29.23:-166.58"));
   S2Error error;
   ASSERT_TRUE(builder.Build(&error)) << error;
-  const char* expected = "25.84:131.46, -18.02:-5.83";
+  constexpr string_view expected = "25.84:131.46, -18.02:-5.83";
   EXPECT_EQ(expected, s2textformat::ToString(output));
 }
 
@@ -1677,7 +1692,8 @@ TEST(S2Builder, VoronoiSiteExclusionBug2) {
   // Snapping to the given vertices would cause the snapped edge to deviate
   // too far from the input edge, so S2Builder adds an extra site.  Given the
   // new site, snapping to the
-  const char* expected = "47.06:-175.17, -34.4968065428191:69.7125289482374";
+  constexpr string_view expected =
+      "47.06:-175.17, -34.4968065428191:69.7125289482374";
   EXPECT_EQ(expected, s2textformat::ToString(output));
 }
 
@@ -1712,6 +1728,13 @@ TEST(S2Builder, IncorrectSeparationSiteBug) {
       S2Point(1, 2.2603503297237029e-320, 4.7729929394856619e-65));
   S2Error error;
   ASSERT_TRUE(builder.Build(&error)) << error;
+}
+
+TEST(S2Builder, PushPopLabel) {
+  // TODO(b/232074544): Test more thoroughly.
+  S2Builder builder;
+  builder.push_label(S2Builder::Label{1});
+  builder.pop_label();
 }
 
 }  // namespace

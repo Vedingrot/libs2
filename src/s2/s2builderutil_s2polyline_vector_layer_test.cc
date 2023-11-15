@@ -19,19 +19,30 @@
 
 #include <memory>
 #include <string>
+#include <vector>
+
 #include "s2/base/casts.h"
 #include "s2/base/integral_types.h"
 #include <gtest/gtest.h>
-#include "absl/memory/memory.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
+#include "s2/id_set_lexicon.h"
 #include "s2/mutable_s2shape_index.h"
+#include "s2/s2builder.h"
+#include "s2/s2builder_layer.h"
 #include "s2/s2builderutil_snap_functions.h"
+#include "s2/s2debug.h"
+#include "s2/s2error.h"
+#include "s2/s2point.h"
+#include "s2/s2polyline.h"
+#include "s2/s2shape.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
+using absl::string_view;
 using s2builderutil::IndexedS2PolylineVectorLayer;
 using s2builderutil::S2PolylineVectorLayer;
 using s2textformat::MakePolylineOrDie;
+using std::make_unique;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -42,9 +53,8 @@ using PolylineType = S2PolylineVectorLayer::Options::PolylineType;
 namespace {
 
 void TestS2PolylineVector(
-    const vector<const char*>& input_strs,
-    const vector<const char*>& expected_strs,
-    EdgeType edge_type,
+    const vector<string_view>& input_strs,
+    const vector<string_view>& expected_strs, EdgeType edge_type,
     S2PolylineVectorLayer::Options layer_options =  // by value
     S2PolylineVectorLayer::Options(),
     const S2Builder::Options& builder_options = S2Builder::Options()) {
@@ -69,10 +79,10 @@ void TestS2PolylineVector(
 
 // Convenience function that tests both directed and undirected edges.
 void TestS2PolylineVector(
-    const vector<const char*>& input_strs,
-    const vector<const char*>& expected_strs,
+    const vector<string_view>& input_strs,
+    const vector<string_view>& expected_strs,
     const S2PolylineVectorLayer::Options& layer_options =
-    S2PolylineVectorLayer::Options(),
+        S2PolylineVectorLayer::Options(),
     const S2Builder::Options& builder_options = S2Builder::Options()) {
   TestS2PolylineVector(input_strs, expected_strs, EdgeType::DIRECTED,
                        layer_options, builder_options);
@@ -80,16 +90,17 @@ void TestS2PolylineVector(
                        layer_options, builder_options);
 }
 
-void TestS2PolylineVectorUnchanged(const vector<const char*>& input_strs) {
+void TestS2PolylineVectorUnchanged(const vector<string_view>& input_strs) {
   TestS2PolylineVector(input_strs, input_strs);
 }
 
 TEST(S2PolylineVectorLayer, NoEdges) {
-  TestS2PolylineVectorUnchanged({});
+  TestS2PolylineVectorUnchanged(vector<string_view>({}));
 }
 
 TEST(S2PolylineVectorLayer, TwoPolylines) {
-  TestS2PolylineVectorUnchanged({"0:0, 1:1, 2:2", "4:4, 3:3"});
+  TestS2PolylineVectorUnchanged(
+      vector<string_view>({"0:0, 1:1, 2:2", "4:4, 3:3"}));
 }
 
 TEST(S2PolylineVectorLayer, JoiningPolylines) {
@@ -128,7 +139,7 @@ TEST(S2PolylineVectorLayer, MultipleIntersectingWalks) {
   // happens to pass for undirected edges as well.
   S2PolylineVectorLayer::Options layer_options;
   layer_options.set_polyline_type(PolylineType::WALK);
-  vector<const char*> input = {
+  vector<string_view> input = {
     "5:5, 5:6, 6:5, 5:5, 5:4, 5:3",
     "4:4, 5:5, 6:5, 5:6, 5:5, 5:6, 6:5, 5:5, 4:5",
     "3:5, 5:5, 5:6, 6:5, 5:5, 5:6, 6:6, 7:7",
@@ -142,12 +153,8 @@ TEST(S2PolylineVectorLayer, EarlyWalkTermination) {
   // building non-maximal polylines.
   S2PolylineVectorLayer::Options layer_options;
   layer_options.set_polyline_type(PolylineType::WALK);
-  vector<const char*> input = {
-    "0:1, 1:1",
-    "1:0, 1:1, 1:2",
-    "0:2, 1:2, 2:2",
-    "2:1, 2:2, 2:3"
-  };
+  vector<string_view> input = {"0:1, 1:1", "1:0, 1:1, 1:2", "0:2, 1:2, 2:2",
+                               "2:1, 2:2, 2:3"};
   TestS2PolylineVector(input, input, layer_options);
 }
 
@@ -160,7 +167,7 @@ TEST(S2PolylineVectorLayer, InputEdgeStartsMultipleLoops) {
       S2PolylineVectorLayer::Options::SiblingPairs::DISCARD);
   S2Builder::Options builder_options;
   builder_options.set_snap_function(s2builderutil::IntLatLngSnapFunction(7));
-  vector<const char*> input = {
+  vector<string_view> input = {
     "0:10, 0:0",
     "0:6, 1:6, 1:7, 0:7, 0:8",
     "0:8, 1:8, 1:9, 0:9, 0:10",
@@ -168,7 +175,7 @@ TEST(S2PolylineVectorLayer, InputEdgeStartsMultipleLoops) {
     "0:0, 1:0, 1:1, 0:1, 0:2",
     "0:4, 1:4, 1:5, 0:5, 0:6",
   };
-  vector<const char*> expected = {
+  vector<string_view> expected = {
     "0:1, 0:0, 1:0, 1:1, 0:1",
     "0:3, 0:2, 1:2, 1:3, 0:3",
     "0:5, 0:4, 1:4, 1:5, 0:5",

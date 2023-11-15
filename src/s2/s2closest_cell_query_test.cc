@@ -17,33 +17,47 @@
 
 #include "s2/s2closest_cell_query.h"
 
+#include <cmath>
+
+#include <algorithm>
 #include <memory>
-#include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include <gtest/gtest.h>
 
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/str_format.h"
 
 #include "s2/mutable_s2shape_index.h"
 #include "s2/s1angle.h"
+#include "s2/s1chord_angle.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
 #include "s2/s2cell_id.h"
+#include "s2/s2cell_index.h"
+#include "s2/s2cell_union.h"
+#include "s2/s2closest_cell_query_base.h"
 #include "s2/s2closest_edge_query_testing.h"
-#include "s2/s2loop.h"
+#include "s2/s2edge_distances.h"
+#include "s2/s2latlng.h"
+#include "s2/s2latlng_rect.h"
+#include "s2/s2metrics.h"
+#include "s2/s2min_distance_targets.h"
+#include "s2/s2point.h"
+#include "s2/s2region.h"
+#include "s2/s2region_coverer.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 
 namespace {
 
-using absl::make_unique;
 using s2testing::FractalLoopShapeIndexFactory;
 using s2textformat::MakeCellIdOrDie;
 using s2textformat::MakePointOrDie;
+using std::make_unique;
 using std::pair;
 using std::unique_ptr;
 using std::vector;
@@ -86,6 +100,24 @@ TEST(S2ClosestCellQuery, OptionsNotModified) {
   EXPECT_EQ(options.max_results(), query.options().max_results());
   EXPECT_EQ(options.max_distance(), query.options().max_distance());
   EXPECT_EQ(options.max_error(), query.options().max_error());
+}
+
+TEST(S2ClosestCellQuery, OptionsS1AngleSetters) {
+  // Verify that the S1Angle and S1ChordAngle versions do the same thing.
+  // This is mainly to prevent the (so far unused) S1Angle versions from
+  // being detected as dead code.
+  S2ClosestCellQuery::Options angle_options, chord_angle_options;
+  angle_options.set_max_distance(S1Angle::Degrees(1));
+  chord_angle_options.set_max_distance(S1ChordAngle::Degrees(1));
+  EXPECT_EQ(chord_angle_options.max_distance(), angle_options.max_distance());
+
+  angle_options.set_inclusive_max_distance(S1Angle::Degrees(1));
+  chord_angle_options.set_inclusive_max_distance(S1ChordAngle::Degrees(1));
+  EXPECT_EQ(chord_angle_options.max_distance(), angle_options.max_distance());
+
+  angle_options.set_conservative_max_distance(S1Angle::Degrees(1));
+  chord_angle_options.set_conservative_max_distance(S1ChordAngle::Degrees(1));
+  EXPECT_EQ(chord_angle_options.max_distance(), angle_options.max_distance());
 }
 
 TEST(S2ClosestCellQuery, DistanceEqualToLimit) {
@@ -162,7 +194,7 @@ TEST(S2ClosestCellQuery, EmptyCellUnionTarget) {
 // An abstract class that adds cells to an S2CellIndex for benchmarking.
 struct CellIndexFactory {
  public:
-  virtual ~CellIndexFactory() {}
+  virtual ~CellIndexFactory() = default;
 
   // Requests that approximately "num_cells" cells located within the given
   // S2Cap bound should be added to "index".

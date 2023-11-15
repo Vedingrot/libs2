@@ -16,22 +16,20 @@
 
 #include "s2/s2point_compression.h"
 
-#include <cstddef>
+#include <string>
 #include <vector>
-
-#include "s2/base/commandlineflags.h"
-#include "s2/base/logging.h"
 
 #include <gtest/gtest.h>
 
 #include "absl/container/fixed_array.h"
-#include "absl/flags/flag.h"
 #include "absl/types/span.h"
 
-#include "s2/util/coding/coder.h"
+#include "s2/base/commandlineflags.h"
+#include "s2/base/logging.h"
 #include "s2/s1angle.h"
 #include "s2/s2cell_id.h"
 #include "s2/s2coords.h"
+#include "s2/s2point.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 #include "s2/util/coding/coder.h"
@@ -305,7 +303,7 @@ TEST_F(S2PointCompressionTest, FirstPointOnFaceEdge) {
   S2EncodePointsCompressed(points, 8, &encoder);
   Decoder decoder(encoder.base(), encoder.length());
   S2Point result[2];
-  S2DecodePointsCompressed(&decoder, 8, result);
+  ASSERT_TRUE(S2DecodePointsCompressed(&decoder, 8, result));
   S2_CHECK(result[0] == points[0].xyz);
   S2_CHECK(result[1] == points[1].xyz);
 }

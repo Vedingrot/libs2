@@ -18,6 +18,8 @@
 #define S2_S2POLYLINE_ALIGNMENT_INTERNAL_H_
 
 #include <limits>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "s2/s2polyline.h"

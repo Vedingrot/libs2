@@ -21,37 +21,42 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <ios>
 #include <memory>
+#include <ostream>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
-#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 
 #include "s2/base/commandlineflags.h"
 #include "s2/base/integral_types.h"
-#include "s2/base/logging.h"
 #include "s2/r1interval.h"
+#include "s2/r2.h"
 #include "s2/s1angle.h"
 #include "s2/s1interval.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
+#include "s2/s2cell_id.h"
 #include "s2/s2cell_union.h"
+#include "s2/s2edge_distances.h"
 #include "s2/s2latlng.h"
 #include "s2/s2latlng_rect.h"
 #include "s2/s2lax_polygon_shape.h"
 #include "s2/s2lax_polyline_shape.h"
 #include "s2/s2loop.h"
+#include "s2/s2point.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2polygon.h"
 #include "s2/s2polyline.h"
 #include "s2/s2region.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2text_format.h"
-#include "s2/strings/serialize.h"
 #include "s2/util/math/matrix3x3.h"
 
-using absl::make_unique;
+using absl::string_view;
+using std::make_unique;
 using std::max;
 using std::string;
 using std::unique_ptr;
@@ -103,13 +108,9 @@ inline uint64 GetBits(int num_bits) {
   return result;
 }
 
-uint64 S2Testing::Random::Rand64() {
-  return GetBits(64);
-}
+uint64 S2Testing::Random::Rand64() { return GetBits(64); }
 
-uint32 S2Testing::Random::Rand32() {
-  return GetBits(32);
-}
+uint32 S2Testing::Random::Rand32() { return GetBits(32); }
 
 double S2Testing::Random::RandDouble() {
   const int NUM_BITS = 53;
@@ -126,9 +127,7 @@ double S2Testing::Random::UniformDouble(double min, double limit) {
   return min + RandDouble() * (limit - min);
 }
 
-bool S2Testing::Random::OneIn(int32 n) {
-  return Uniform(n) == 0;
-}
+bool S2Testing::Random::OneIn(int32 n) { return Uniform(n) == 0; }
 
 int32 S2Testing::Random::Skewed(int max_log) {
   S2_DCHECK_GE(max_log, 0);
@@ -238,7 +237,7 @@ S2Point S2Testing::RandomPoint() {
   return S2Point(x, y, z).Normalize();
 }
 
-void S2Testing::GetRandomFrame(Vector3_d* x, Vector3_d* y, Vector3_d* z) {
+void S2Testing::GetRandomFrame(S2Point* x, S2Point* y, S2Point* z) {
   *z = RandomPoint();
   GetRandomFrameAt(*z, x, y);
 }
@@ -328,6 +327,11 @@ S2Point S2Testing::SamplePoint(const S2LatLngRect& rect) {
   // Now choose longitude uniformly within the given range.
   double lng = rect.lng().lo() + rnd.RandDouble() * rect.lng().GetLength();
   return S2LatLng::FromRadians(lat, lng).Normalized().ToPoint();
+}
+
+void S2Testing::SampleCapEdge(const S2Cap& cap, S2Point* a, S2Point* b) {
+  *a = SamplePoint(cap);
+  *b = S2::GetPointOnLine(*a, cap.center(), 2 * cap.GetRadius());
 }
 
 void S2Testing::CheckCovering(const S2Region& region,
@@ -470,9 +474,8 @@ void S2Testing::Fractal::GetR2VerticesHelper(const R2Point& v0,
   GetR2VerticesHelper(v3, v4, level+1, vertices);
 }
 
-std::unique_ptr<S2Loop> S2Testing::Fractal::MakeLoop(
-    const Matrix3x3_d& frame,
-    S1Angle nominal_radius) const {
+unique_ptr<S2Loop> S2Testing::Fractal::MakeLoop(const Matrix3x3_d& frame,
+                                                S1Angle nominal_radius) const {
   vector<R2Point> r2vertices;
   GetR2Vertices(&r2vertices);
   vector<S2Point> vertices;

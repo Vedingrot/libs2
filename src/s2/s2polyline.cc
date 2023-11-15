@@ -17,47 +17,57 @@
 
 #include "s2/s2polyline.h"
 
+#include <cstddef>
+
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <functional>
 #include <memory>
-#include <set>
 #include <utility>
 #include <vector>
 
 #include "absl/container/fixed_array.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
+#include "absl/types/span.h"
 #include "absl/utility/utility.h"
 
 #include "s2/base/commandlineflags.h"
+#include "s2/base/integral_types.h"
 #include "s2/base/logging.h"
 #include "s2/s1angle.h"
 #include "s2/s1interval.h"
+#include "s2/s2builder.h"
+#include "s2/s2builder_layer.h"
 #include "s2/s2builderutil_s2polyline_layer.h"
 #include "s2/s2builderutil_snap_functions.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
+#include "s2/s2coder.h"
+#include "s2/s2coords.h"
 #include "s2/s2debug.h"
 #include "s2/s2edge_crosser.h"
 #include "s2/s2edge_distances.h"
 #include "s2/s2error.h"
+#include "s2/s2latlng.h"
+#include "s2/s2latlng_rect.h"
 #include "s2/s2latlng_rect_bounder.h"
 #include "s2/s2point.h"
 #include "s2/s2point_compression.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2polyline_measures.h"
 #include "s2/s2predicates.h"
+#include "s2/s2shape.h"
 #include "s2/util/coding/coder.h"
 #include "s2/util/math/matrix3x3.h"
 
-using absl::make_unique;
+using absl::flat_hash_set;
 using absl::Span;
 using s2builderutil::S2CellIdSnapFunction;
 using s2builderutil::S2PolylineLayer;
+using std::make_unique;
 using std::max;
 using std::min;
-using std::set;
 using std::vector;
 
 static const unsigned char kCurrentLosslessEncodingVersionNumber = 1;
@@ -96,8 +106,7 @@ S2Polyline::S2Polyline(Span<const S2LatLng> vertices, S2Debug override)
   Init(vertices);
 }
 
-S2Polyline::~S2Polyline() {
-}
+S2Polyline::~S2Polyline() = default;
 
 void S2Polyline::set_s2debug_override(S2Debug override) {
   s2debug_override_ = override;
@@ -142,7 +151,7 @@ void S2Polyline::InitToSimplified(
 
 void S2Polyline::InitFromBuilder(const S2Polyline& polyline,
                                  S2Builder* builder) {
-  builder->StartLayer(absl::make_unique<S2PolylineLayer>(this));
+  builder->StartLayer(make_unique<S2PolylineLayer>(this));
   builder->AddPolyline(polyline);
   S2Error error;
   S2_CHECK(builder->Build(&error)) << "Could not build polyline: " << error;
@@ -401,7 +410,13 @@ bool S2Polyline::MayIntersect(const S2Cell& cell) const {
   return false;
 }
 
-void S2Polyline::Encode(Encoder* const encoder) const {
+void S2Polyline::Encode(Encoder* const encoder,
+                        s2coding::CodingHint hint) const {
+  if (hint == s2coding::CodingHint::COMPACT) {
+    EncodeMostCompact(encoder);
+    return;
+  }
+
   EncodeUncompressed(encoder);
 }
 
@@ -672,19 +687,18 @@ struct SearchState {
   inline SearchState(int i_val, int j_val, bool i_in_progress_val)
       : i(i_val), j(j_val), i_in_progress(i_in_progress_val) {}
 
+  friend bool operator==(const SearchState& a, const SearchState& b) {
+    return a.i == b.i && a.j == b.j && a.i_in_progress == b.i_in_progress;
+  }
+
+  template <typename H>
+  friend H AbslHashValue(H h, const SearchState& s) {
+    return H::combine(std::move(h), s.i, s.j, s.i_in_progress);
+  }
+
   int i;
   int j;
   bool i_in_progress;
-};
-
-// This operator is needed for storing SearchStates in a set.  The ordering
-// chosen has no special meaning.
-struct SearchStateKeyCompare {
-  bool operator() (const SearchState& a, const SearchState& b) const {
-    if (a.i != b.i) return a.i < b.i;
-    if (a.j != b.j) return a.j < b.j;
-    return a.i_in_progress < b.i_in_progress;
-  }
 };
 
 }  // namespace
@@ -739,7 +753,7 @@ bool S2Polyline::NearlyCovers(const S2Polyline& covered,
   if (this->num_vertices() == 0) return false;
 
   vector<SearchState> pending;
-  set<SearchState, SearchStateKeyCompare> done;
+  flat_hash_set<SearchState> done;
 
   // Find all possible starting states.
   for (int i = 0, next_i = NextDistinctVertex(*this, 0), next_next_i;

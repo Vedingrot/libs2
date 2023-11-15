@@ -22,9 +22,13 @@
 #include <utility>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include "s2/s2builder.h"
 #include "s2/s2builder_graph.h"
 #include "s2/s2builder_layer.h"
+#include "s2/s2error.h"
+#include "s2/s2memory_tracker.h"
+#include "s2/s2shape_index.h"
 #include "s2/value_lexicon.h"
 
 // This class implements boolean operations (intersection, union, difference,
@@ -199,7 +203,7 @@
 //   S2BooleanOperation::Options options;
 //   options.set_snap_function(snap_function);
 //   S2BooleanOperation op(S2BooleanOperation::OpType::INTERSECTION,
-//                         absl::make_unique<S2PolygonLayer>(&polygon),
+//                         std::make_unique<S2PolygonLayer>(&polygon),
 //                         options);
 //   S2Error error;
 //   if (!op.Build(a, b, &error)) {
@@ -215,9 +219,9 @@
 //   S2Polygon polygon;
 //   S2BooleanOperation op(
 //       S2BooleanOperation::OpType::UNION,
-//       absl::make_unique<s2builderutil::PointVectorLayer>(&points),
-//       absl::make_unique<s2builderutil::S2PolylineVectorLayer>(&polylines),
-//       absl::make_unique<S2PolygonLayer>(&polygon));
+//       std::make_unique<s2builderutil::PointVectorLayer>(&points),
+//       std::make_unique<s2builderutil::S2PolylineVectorLayer>(&polylines),
+//       std::make_unique<S2PolygonLayer>(&polygon));
 
 class S2BooleanOperation {
  public:
@@ -229,21 +233,21 @@ class S2BooleanOperation {
     SYMMETRIC_DIFFERENCE  // Contained by one region but not the other.
   };
   // Translates OpType to one of the strings above.
-  static const char* OpTypeToString(OpType op_type);
+  static absl::string_view OpTypeToString(OpType op_type);
 
   // Defines whether polygons are considered to contain their vertices and/or
   // edges (see definitions above).
   enum class PolygonModel : uint8 { OPEN, SEMI_OPEN, CLOSED };
 
   // Translates PolygonModel to one of the strings above.
-  static const char* PolygonModelToString(PolygonModel model);
+  static absl::string_view PolygonModelToString(PolygonModel model);
 
   // Defines whether polylines are considered to contain their endpoints
   // (see definitions above).
   enum class PolylineModel : uint8 { OPEN, SEMI_OPEN, CLOSED };
 
   // Translates PolylineModel to one of the strings above.
-  static const char* PolylineModelToString(PolylineModel model);
+  static absl::string_view PolylineModelToString(PolylineModel model);
 
   // With Precision::EXACT, the operation is evaluated using the exact input
   // geometry.  Predicates that use this option will produce exact results;
@@ -463,6 +467,7 @@ class S2BooleanOperation {
     S2MemoryTracker* memory_tracker_ = nullptr;
   };
 
+#ifndef SWIG
   // Specifies that the output boundary edges should be sent to a single
   // S2Builder layer.  This version can be used when the dimension of the
   // output geometry is known (e.g., intersecting two polygons to yield a
@@ -492,6 +497,7 @@ class S2BooleanOperation {
   S2BooleanOperation(OpType op_type,
                      std::vector<std::unique_ptr<S2Builder::Layer>> layers,
                      const Options& options = Options());
+#endif
 
   OpType op_type() const { return op_type_; }
   const Options& options() const { return options_; }

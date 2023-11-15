@@ -17,37 +17,50 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
-#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 
 #include "s2/mutable_s2shape_index.h"
+#include "s2/r2rect.h"
+#include "s2/s1angle.h"
+#include "s2/s2cap.h"
+#include "s2/s2cell.h"
+#include "s2/s2cell_id.h"
+#include "s2/s2coords.h"
+#include "s2/s2edge_clipping.h"
+#include "s2/s2latlng.h"
+#include "s2/s2latlng_rect.h"
 #include "s2/s2lax_loop_shape.h"
 #include "s2/s2lax_polyline_shape.h"
+#include "s2/s2loop.h"
+#include "s2/s2point.h"
 #include "s2/s2point_vector_shape.h"
+#include "s2/s2shape.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2testing.h"
 #include "s2/s2wrapped_shape.h"
 
-using absl::make_unique;
-using std::map;
+using absl::flat_hash_map;
+using absl::string_view;
+using std::make_unique;
 using std::string;
 using std::unique_ptr;
 using std::vector;
 
 namespace {
 
-S2CellId MakeCellId(absl::string_view str) {
-  return S2CellId::FromDebugString(str);
-}
+S2CellId MakeCellId(string_view str) { return S2CellId::FromDebugString(str); }
 
 // Pad by at least twice the maximum error for reliable results.
 static const double kPadding = 2 * (S2::kFaceClipErrorUVCoord +
                                     S2::kIntersectsRectErrorUVDist);
 
-std::unique_ptr<S2Shape> NewPaddedCell(S2CellId id, double padding_uv) {
+unique_ptr<S2Shape> NewPaddedCell(S2CellId id, double padding_uv) {
   int ij[2], orientation;
   int face = id.ToFaceIJOrientation(&ij[0], &ij[1], &orientation);
   R2Rect uv = S2CellId::IJLevelToBoundUV(ij, id.level()).Expanded(padding_uv);
@@ -201,7 +214,7 @@ class VisitIntersectingShapesTest {
  private:
   void TestCell(const S2Cell& target) {
     // Indicates whether each shape that intersects "target" also contains it.
-    map<int, bool> shape_contains;
+    flat_hash_map<int, bool> shape_contains;
     EXPECT_TRUE(region_.VisitIntersectingShapes(
         target, [&](S2Shape* shape, bool contains_target) {
             // Verify that each shape is visited at most once.
@@ -218,10 +231,10 @@ class VisitIntersectingShapesTest {
       }
     }
     switch (iter_.Locate(target.id())) {
-      case S2ShapeIndex::DISJOINT:
+      case S2CellRelation::DISJOINT:
         return;
 
-      case S2ShapeIndex::SUBDIVIDED: {
+      case S2CellRelation::SUBDIVIDED: {
         S2Cell children[4];
         EXPECT_TRUE(target.Subdivide(children));
         for (const auto& child : children) {
@@ -230,7 +243,7 @@ class VisitIntersectingShapesTest {
         return;
       }
 
-      case S2ShapeIndex::INDEXED: {
+      case S2CellRelation::INDEXED: {
         // We check a few random descendant cells by continuing randomly down
         // one branch of the tree for a few levels.
         if (target.is_leaf() || S2Testing::rnd.OneIn(3)) return;

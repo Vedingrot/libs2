@@ -102,7 +102,9 @@
 
 #include "absl/strings/string_view.h"
 
+#include "s2/s2cell_id.h"
 #include "s2/s2cell_union.h"
+#include "s2/s2point.h"
 #include "s2/s2region.h"
 #include "s2/s2region_coverer.h"
 
@@ -216,14 +218,14 @@ class S2RegionTermIndexer {
     //
     // REQUIRES: "ch" is non-alphanumeric.
     // DEFAULT: '$'
-    const std::string& marker() const { return marker_; }
-    char marker_character() const { return marker_[0]; }
+    absl::string_view marker() const { return absl::string_view(&marker_, 1); }
+    char marker_character() const { return marker_; }
     void set_marker_character(char ch);
 
    private:
     bool points_only_ = false;
     bool optimize_for_space_ = false;
-    std::string marker_ = std::string(1, '$');
+    char marker_ = '$';
   };
 
   // Default constructor.  Options can be set using mutable_options().
@@ -290,7 +292,7 @@ class S2RegionTermIndexer {
  private:
   enum TermType { ANCESTOR, COVERING };
 
-  std::string GetTerm(TermType term_type, const S2CellId& id,
+  std::string GetTerm(TermType term_type, const S2CellId id,
                       absl::string_view prefix) const;
 
   Options options_;

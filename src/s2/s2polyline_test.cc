@@ -25,28 +25,32 @@
 
 #include <gtest/gtest.h>
 
-#include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 
-#include "s2/base/commandlineflags.h"
 #include "s2/s1angle.h"
 #include "s2/s2builderutil_snap_functions.h"
 #include "s2/s2cell.h"
+#include "s2/s2cell_id.h"
+#include "s2/s2coder_testing.h"
 #include "s2/s2coords.h"
 #include "s2/s2debug.h"
+#include "s2/s2error.h"
 #include "s2/s2latlng.h"
+#include "s2/s2latlng_rect.h"
+#include "s2/s2point.h"
+#include "s2/s2point_span.h"
 #include "s2/s2pointutil.h"
+#include "s2/s2shape.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
-#include "absl/memory/memory.h"
-#include "absl/strings/str_cat.h"
 #include "s2/util/coding/coder.h"
 
-using absl::make_unique;
 using absl::StrCat;
+using absl::string_view;
 using s2builderutil::S2CellIdSnapFunction;
 using std::fabs;
+using std::make_unique;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -54,7 +58,7 @@ using std::vector;
 namespace {
 
 // Wraps s2textformat::MakePolylineOrDie in order to test Encode/Decode.
-unique_ptr<S2Polyline> MakePolyline(absl::string_view str,
+unique_ptr<S2Polyline> MakePolyline(string_view str,
                                     S2Debug debug_override = S2Debug::ALLOW) {
   unique_ptr<S2Polyline> polyline =
       s2textformat::MakePolylineOrDie(str, debug_override);
@@ -63,7 +67,10 @@ unique_ptr<S2Polyline> MakePolyline(absl::string_view str,
   Decoder decoder(encoder.base(), encoder.length());
   auto decoded_polyline = make_unique<S2Polyline>();
   decoded_polyline->set_s2debug_override(debug_override);
-  decoded_polyline->Decode(&decoder);
+  // Provide some minimal test coverage for `s2debug_override`.
+  S2_CHECK_EQ(static_cast<int>(debug_override),
+           static_cast<int>(decoded_polyline->s2debug_override()));
+  S2_CHECK(decoded_polyline->Decode(&decoder)) << str;
   return decoded_polyline;
 }
 
@@ -124,7 +131,7 @@ TEST(S2Polyline, GetLengthAndCentroid) {
 
   for (int i = 0; i < 100; ++i) {
     // Choose a coordinate frame for the great circle.
-    Vector3_d x, y, z;
+    S2Point x, y, z;
     S2Testing::GetRandomFrame(&x, &y, &z);
 
     vector<S2Point> vertices;
@@ -309,13 +316,13 @@ TEST(S2Polyline, IsOnRight) {
 TEST(S2Polyline, IntersectsEmptyPolyline) {
   unique_ptr<S2Polyline> line1(MakePolyline("1:1, 4:4"));
   S2Polyline empty_polyline;
-  EXPECT_FALSE(empty_polyline.Intersects(line1.get()));
+  EXPECT_FALSE(empty_polyline.Intersects(*line1.get()));
 }
 
 TEST(S2Polyline, IntersectsOnePointPolyline) {
   unique_ptr<S2Polyline> line1(MakePolyline("1:1, 4:4"));
   unique_ptr<S2Polyline> line2(MakePolyline("1:1"));
-  EXPECT_FALSE(line1->Intersects(line2.get()));
+  EXPECT_FALSE(line1->Intersects(*line2.get()));
 }
 
 TEST(S2Polyline, Intersects) {
@@ -324,17 +331,17 @@ TEST(S2Polyline, Intersects) {
   unique_ptr<S2Polyline> small_noncrossing(MakePolyline("1:2, 2:3"));
   unique_ptr<S2Polyline> big_crossing(MakePolyline("1:2, 2:3, 4:3"));
 
-  EXPECT_TRUE(line1->Intersects(small_crossing.get()));
-  EXPECT_FALSE(line1->Intersects(small_noncrossing.get()));
-  EXPECT_TRUE(line1->Intersects(big_crossing.get()));
+  EXPECT_TRUE(line1->Intersects(*small_crossing.get()));
+  EXPECT_FALSE(line1->Intersects(*small_noncrossing.get()));
+  EXPECT_TRUE(line1->Intersects(*big_crossing.get()));
 }
 
 TEST(S2Polyline, IntersectsAtVertex) {
   unique_ptr<S2Polyline> line1(MakePolyline("1:1, 4:4, 4:6"));
   unique_ptr<S2Polyline> line2(MakePolyline("1:1, 1:2"));
   unique_ptr<S2Polyline> line3(MakePolyline("5:1, 4:4, 2:2"));
-  EXPECT_TRUE(line1->Intersects(line2.get()));
-  EXPECT_TRUE(line1->Intersects(line3.get()));
+  EXPECT_TRUE(line1->Intersects(*line2.get()));
+  EXPECT_TRUE(line1->Intersects(*line3.get()));
 }
 
 TEST(S2Polyline, IntersectsVertexOnEdge)  {
@@ -342,14 +349,14 @@ TEST(S2Polyline, IntersectsVertexOnEdge)  {
   unique_ptr<S2Polyline> vertical_bottom_to_top(MakePolyline("-1:2, 0:2, 1:2"));
   unique_ptr<S2Polyline> horizontal_right_to_left(MakePolyline("0:3, 0:1"));
   unique_ptr<S2Polyline> vertical_top_to_bottom(MakePolyline("1:2, 0:2, -1:2"));
-  EXPECT_TRUE(horizontal_left_to_right->Intersects(
-      vertical_bottom_to_top.get()));
-  EXPECT_TRUE(horizontal_left_to_right->Intersects(
-      vertical_top_to_bottom.get()));
-  EXPECT_TRUE(horizontal_right_to_left->Intersects(
-      vertical_bottom_to_top.get()));
-  EXPECT_TRUE(horizontal_right_to_left->Intersects(
-      vertical_top_to_bottom.get()));
+  EXPECT_TRUE(
+      horizontal_left_to_right->Intersects(*vertical_bottom_to_top.get()));
+  EXPECT_TRUE(
+      horizontal_left_to_right->Intersects(*vertical_top_to_bottom.get()));
+  EXPECT_TRUE(
+      horizontal_right_to_left->Intersects(*vertical_bottom_to_top.get()));
+  EXPECT_TRUE(
+      horizontal_right_to_left->Intersects(*vertical_top_to_bottom.get()));
 }
 
 TEST(S2Polyline, SpaceUsedEmptyPolyline)  {
@@ -374,8 +381,8 @@ static string JoinInts(const vector<int>& ints) {
   return result;
 }
 
-void CheckSubsample(const char* polyline_str, double tolerance_degrees,
-                    const char* expected_str,
+void CheckSubsample(string_view polyline_str, double tolerance_degrees,
+                    string_view expected_str,
                     S2Debug debug_override = S2Debug::ALLOW) {
   SCOPED_TRACE(StrCat("\"", polyline_str, "\", tolerance ",
                       tolerance_degrees));
@@ -409,7 +416,7 @@ TEST(S2Polyline, SubsampleVerticesTrivialInputs) {
 }
 
 TEST(S2Polyline, SubsampleVerticesSimpleExample) {
-  const char* poly_str("0:0, 0:1, -1:2, 0:3, 0:4, 1:4, 2:4.5, 3:4, 3.5:4, 4:4");
+  string_view poly_str("0:0, 0:1, -1:2, 0:3, 0:4, 1:4, 2:4.5, 3:4, 3.5:4, 4:4");
   CheckSubsample(poly_str, 3.0, "0,9");
   CheckSubsample(poly_str, 2.0, "0,6,9");
   CheckSubsample(poly_str, 0.9, "0,2,6,9");
@@ -462,8 +469,7 @@ TEST(S2Polyline, InitToSimplified) {
   EXPECT_EQ(snapped.GetSnapLevel(), S2CellId::kMaxLevel);
 }
 
-static bool TestEquals(const char* a_str,
-                       const char* b_str,
+static bool TestEquals(string_view a_str, string_view b_str,
                        S1Angle max_error) {
   unique_ptr<S2Polyline> a(MakePolyline(a_str));
   unique_ptr<S2Polyline> b(MakePolyline(b_str));
@@ -598,7 +604,7 @@ TEST(S2PolylineOwningShape, Ownership) {
   S2Polyline::OwningShape shape(std::move(polyline));
 }
 
-void TestNearlyCovers(absl::string_view a_str, absl::string_view b_str,
+void TestNearlyCovers(string_view a_str, string_view b_str,
                       double max_error_degrees, bool expect_b_covers_a,
                       bool expect_a_covers_b,
                       S2Debug debug_override = S2Debug::ALLOW) {
@@ -697,6 +703,18 @@ TEST(S2PolylineCoveringTest, EmptyPolylines) {
   //    empty.covers(nonempty) = false
   TestNearlyCovers("0:1, 0:2", "", 0.0, false, true);
   TestNearlyCovers("", "", 0.0, true, true);
+}
+
+TEST(S2Polyline, S2CoderWorks) {
+  using s2textformat::ToString;
+
+  unique_ptr<S2Polyline> polyline =
+      s2textformat::MakePolylineOrDie("0:0, 0:10, 10:20, 20:30");
+
+  S2Error error;
+  auto decoded = s2coding::RoundTrip(S2Polyline::Coder(), *polyline, error);
+
+  EXPECT_EQ(ToString(decoded), ToString(*polyline));
 }
 
 }  // namespace

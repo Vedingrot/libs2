@@ -17,16 +17,34 @@
 
 #include "s2/s2centroids.h"
 
+#include <cmath>
+
+#include <string>
+
 #include <gtest/gtest.h>
+#include "s2/s2point.h"
+#include "s2/s2pointutil.h"
 #include "s2/s2testing.h"
 
 namespace {
+
+TEST(PlanarCentroid, SemiEquator) {
+  // Test the centroid of polyline ABC that follows the equator and consists
+  // of two 90 degree edges (i.e., C = -A).  The centroid should point toward
+  // B and have a norm of 1/3.  This is not a thorough test of
+  // PlanarCentroid; it is only intended to prevent it from being detected as
+  // dead code.
+  S2Point a(0, -1, 0), b(1, 0, 0), c(0, 1, 0);
+  S2Point centroid = S2::PlanarCentroid(a, b, c);
+  EXPECT_TRUE(S2::ApproxEquals(b, centroid.Normalize()));
+  EXPECT_DOUBLE_EQ(1 / 3.0, centroid.Norm());
+}
 
 TEST(TriangleTrueCentroid, SmallTriangles) {
   // Test TrueCentroid() with very small triangles.  This test assumes that
   // the triangle is small enough so that it is nearly planar.
   for (int iter = 0; iter < 100; ++iter) {
-    Vector3_d p, x, y;
+    S2Point p, x, y;
     S2Testing::GetRandomFrame(&p, &x, &y);
     double d = 1e-4 * pow(1e-4, S2Testing::rnd.RandDouble());
     S2Point p0 = (p - d * x).Normalize();

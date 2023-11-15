@@ -28,20 +28,26 @@
 #include "absl/base/macros.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/btree_map.h"
-#include "absl/memory/memory.h"
 #include "absl/synchronization/mutex.h"
 
 #include "s2/base/commandlineflags.h"
+#include "s2/base/commandlineflags_declare.h"
 #include "s2/base/integral_types.h"
 #include "s2/base/logging.h"
 #include "s2/base/spinlock.h"
 #include "s2/_fp_contract_off.h"
+#include "s2/r1interval.h"
+#include "s2/r2rect.h"
 #include "s2/s2cell_id.h"
 #include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2shape.h"
 #include "s2/s2shape_index.h"
 #include "s2/s2shapeutil_shape_edge_id.h"
+#include "s2/util/coding/coder.h"
+
+class S2PaddedCell;
 
 namespace s2internal {
 // Hack to expose bytes_used.
@@ -94,7 +100,7 @@ class BTreeMap : public absl::btree_map<Key, Value> {
 //                        const vector<S2Polygon*>& polygons) {
 //     MutableS2ShapeIndex index;
 //     for (auto polygon : polygons) {
-//       index.Add(absl::make_unique<S2Polygon::Shape>(polygon));
+//       index.Add(std::make_unique<S2Polygon::Shape>(polygon));
 //     }
 //     auto query = MakeS2ContainsPointQuery(&index);
 //     for (const auto& point : points) {
@@ -133,6 +139,10 @@ class MutableS2ShapeIndex final : public S2ShapeIndex {
   using CellMap = s2internal::BTreeMap<S2CellId, S2ShapeIndexCell*>;
 
  public:
+  // The amount by which cells are "padded" to compensate for numerical errors
+  // when clipping line segments to cell boundaries.
+  static const double kCellPadding;
+
   // Options that affect construction of the MutableS2ShapeIndex.
   class Options {
    public:
@@ -170,6 +180,9 @@ class MutableS2ShapeIndex final : public S2ShapeIndex {
   explicit MutableS2ShapeIndex(const Options& options);
 
   ~MutableS2ShapeIndex() override;
+
+  MutableS2ShapeIndex(MutableS2ShapeIndex&&);
+  MutableS2ShapeIndex& operator=(MutableS2ShapeIndex&&);
 
   // Initialize a MutableS2ShapeIndex with the given options.  This method may
   // only be called when the index is empty (i.e. newly created or Clear() has
@@ -317,14 +330,20 @@ class MutableS2ShapeIndex final : public S2ShapeIndex {
     //   S2Point center() const;
     const S2ShapeIndexCell& cell() const;
 
-    // IteratorBase API:
+    // S2CellIterator API:
     void Begin() override;
     void Finish() override;
     void Next() override;
     bool Prev() override;
     void Seek(S2CellId target) override;
-    bool Locate(const S2Point& target) override;
-    CellRelation Locate(S2CellId target) override;
+
+    bool Locate(const S2Point& target) override {
+      return LocateImpl(*this, target);
+    }
+
+    S2CellRelation Locate(S2CellId target) override {
+      return LocateImpl(*this, target);
+    }
 
    protected:
     const S2ShapeIndexCell* GetCell() const override;
@@ -407,12 +426,12 @@ class MutableS2ShapeIndex final : public S2ShapeIndex {
   friend class MutableS2ShapeIndexTest;
   friend class S2Stats;
 
-  struct BatchDescriptor;
   class BatchGenerator;
-  struct ClippedEdge;
   class EdgeAllocator;
-  struct FaceEdge;
   class InteriorTracker;
+  struct BatchDescriptor;
+  struct ClippedEdge;
+  struct FaceEdge;
   struct RemovedShape;
 
   using ShapeEdgeId = s2shapeutil::ShapeEdgeId;
@@ -474,10 +493,6 @@ class MutableS2ShapeIndex final : public S2ShapeIndex {
   static void ClipVAxis(const ClippedEdge* edge, const R1Interval& middle,
                         std::vector<const ClippedEdge*> child_edges[2],
                         EdgeAllocator* alloc);
-
-  // The amount by which cells are "padded" to compensate for numerical errors
-  // when clipping line segments to cell boundaries.
-  static const double kCellPadding;
 
   // The shapes in the index, accessed by their shape id.  Removed shapes are
   // replaced by nullptr pointers.
@@ -568,12 +583,14 @@ class MutableS2ShapeIndex final : public S2ShapeIndex {
 
   S2MemoryTracker::Client mem_tracker_;
 
+#ifndef SWIG
   // Documented in the .cc file.
   void UnlockAndSignal() ABSL_UNLOCK_FUNCTION(lock_)
       ABSL_UNLOCK_FUNCTION(update_state_->wait_mutex);
+#endif
 
   MutableS2ShapeIndex(const MutableS2ShapeIndex&) = delete;
-  void operator=(const MutableS2ShapeIndex&) = delete;
+  MutableS2ShapeIndex& operator=(const MutableS2ShapeIndex&) = delete;
 };
 
 // The following flag can be used to limit the amount of temporary memory used
@@ -735,7 +752,7 @@ inline void MutableS2ShapeIndex::Iterator::Seek(S2CellId target) {
 
 inline std::unique_ptr<MutableS2ShapeIndex::IteratorBase>
 MutableS2ShapeIndex::NewIterator(InitialPosition pos) const {
-  return absl::make_unique<Iterator>(this, pos);
+  return std::make_unique<Iterator>(this, pos);
 }
 
 inline void MutableS2ShapeIndex::ForceBuild() const {

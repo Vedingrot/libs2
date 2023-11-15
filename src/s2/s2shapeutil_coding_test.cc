@@ -17,18 +17,23 @@
 
 #include "s2/s2shapeutil_coding.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 
+#include "s2/base/casts.h"
 #include <gtest/gtest.h>
 #include "absl/strings/escaping.h"
 #include "s2/util/coding/coder.h"
+#include "s2/mutable_s2shape_index.h"
 #include "s2/s2lax_polygon_shape.h"
 #include "s2/s2lax_polyline_shape.h"
 #include "s2/s2point_vector_shape.h"
 #include "s2/s2polygon.h"
+#include "s2/s2shape.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
+using std::make_unique;
 using std::string;
 
 namespace s2shapeutil {
@@ -37,11 +42,11 @@ TEST(FastEncodeShape, S2Polygon) {
   auto polygon = s2textformat::MakePolygonOrDie("0:0, 0:1, 1:0");
   auto shape = make_unique<S2Polygon::Shape>(polygon.get());
   Encoder encoder;
-  FastEncodeShape(*shape, &encoder);
+  ASSERT_TRUE(FastEncodeShape(*shape, &encoder));
   Decoder decoder(encoder.base(), encoder.length());
   auto shape2 = FullDecodeShape(S2Polygon::Shape::kTypeTag, &decoder);
   EXPECT_TRUE(shape->polygon()->Equals(
-      down_cast<S2Polygon::Shape*>(shape2.get())->polygon()));
+      *down_cast<S2Polygon::Shape*>(shape2.get())->polygon()));
 }
 
 TEST(FastEncodeTaggedShapes, MixedShapes) {
@@ -49,11 +54,12 @@ TEST(FastEncodeTaggedShapes, MixedShapes) {
   auto index = s2textformat::MakeIndexOrDie(
       "0:0 | 0:1 # 1:1, 1:2, 1:3 # 2:2; 2:3, 2:4, 3:3");
   Encoder encoder;
-  s2shapeutil::FastEncodeTaggedShapes(*index, &encoder);
+  ASSERT_TRUE(s2shapeutil::FastEncodeTaggedShapes(*index, &encoder));
   index->Encode(&encoder);
   Decoder decoder(encoder.base(), encoder.length());
   MutableS2ShapeIndex decoded_index;
-  decoded_index.Init(&decoder, s2shapeutil::FullDecodeShapeFactory(&decoder));
+  ASSERT_TRUE(decoded_index.Init(
+      &decoder, s2shapeutil::FullDecodeShapeFactory(&decoder)));
   EXPECT_EQ(s2textformat::ToString(*index),
             s2textformat::ToString(decoded_index));
 }
@@ -63,10 +69,8 @@ TEST(DecodeTaggedShapes, DecodeFromByteString) {
       "0:0 | 0:1 # 1:1, 1:2, 1:3 # 2:2; 2:3, 2:4, 3:3");
   auto polygon = s2textformat::MakePolygonOrDie("0:0, 0:4, 4:4, 4:0");
   auto polyline = s2textformat::MakePolylineOrDie("1:1, 1:2, 1:3");
-  index->Add(std::unique_ptr<S2Shape>(
-      absl::make_unique<S2LaxPolylineShape>(*polyline)));
-  index->Add(
-      std::unique_ptr<S2Shape>(absl::make_unique<S2LaxPolygonShape>(*polygon)));
+  index->Add(make_unique<S2LaxPolylineShape>(*polyline));
+  index->Add(make_unique<S2LaxPolygonShape>(*polygon));
   string bytes = absl::HexStringToBytes(
       "2932007C00E4002E0192010310000000000000F03F000000000000000000000000000000"
       "008AAFF597C0FEEF3F1EDD892B0BDF913F00000000000000000418B4825F3C81FDEF3F27"
@@ -84,7 +88,8 @@ TEST(DecodeTaggedShapes, DecodeFromByteString) {
       "04020400020113082106110A4113000111030101");
   Decoder decoder(bytes.data(), bytes.length());
   MutableS2ShapeIndex decoded_index;
-  decoded_index.Init(&decoder, s2shapeutil::FullDecodeShapeFactory(&decoder));
+  ASSERT_TRUE(decoded_index.Init(
+      &decoder, s2shapeutil::FullDecodeShapeFactory(&decoder)));
   EXPECT_EQ(s2textformat::ToString(*index),
             s2textformat::ToString(decoded_index));
 }
@@ -98,7 +103,7 @@ TEST(DecodeTaggedShapes, DecodeFromEncoded) {
       &encoder));
   Decoder decoder(encoder.base(), encoder.length());
   EncodedS2PointVectorShape encoded_shape;
-  encoded_shape.Init(&decoder);
+  ASSERT_TRUE(encoded_shape.Init(&decoder));
 
   // Encode the encoded form.
   Encoder reencoder;
@@ -114,6 +119,21 @@ TEST(DecodeTaggedShapes, DecodeFromEncoded) {
   auto lazy_shape = s2shapeutil::LazyDecodeShape(S2PointVectorShape::kTypeTag,
                                                  &encoded_decoder);
   ASSERT_EQ(lazy_shape->type_tag(), S2PointVectorShape::kTypeTag);
+}
+
+TEST(SingletonShapeFactory, S2Polygon) {
+  auto polygon = s2textformat::MakePolygonOrDie("0:0, 0:1, 1:0");
+  auto shape = make_unique<S2Polygon::Shape>(polygon.get());
+  VectorShapeFactory shape_factory = SingletonShapeFactory(std::move(shape));
+
+  // Returns the shape the first time.
+  auto shape2 = shape_factory[0];
+  EXPECT_TRUE(
+      polygon->Equals(*down_cast<S2Polygon::Shape*>(shape2.get())->polygon()));
+
+  // And nullptr after that.
+  auto shape3 = shape_factory[0];
+  EXPECT_TRUE(shape3 == nullptr);
 }
 
 }  // namespace s2shapeutil

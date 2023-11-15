@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "absl/base/macros.h"
+#include "absl/container/flat_hash_set.h"
 
 #include "s2/base/integral_types.h"
 #include "s2/_fp_contract_off.h"
@@ -36,11 +37,14 @@
 #include "s2/s1angle.h"
 #include "s2/s1chord_angle.h"
 #include "s2/s2cell_id.h"
+#include "s2/s2edge_crossings.h"
 #include "s2/s2edge_distances.h"
 #include "s2/s2error.h"
 #include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
 #include "s2/s2point_index.h"
 #include "s2/s2point_span.h"
+#include "s2/s2shape.h"
 #include "s2/s2shape_index.h"
 #include "s2/util/gtl/compact_array.h"
 
@@ -131,7 +135,7 @@ class S2Polyline;
 //  using s2builderutil::IntLatLngSnapFunction;
 //  S2Builder builder(S2Builder::Options(IntLatLngSnapFunction(7)));
 //  S2Polygon output;
-//  builder.StartLayer(absl::make_unique<s2builderutil::S2PolygonLayer>(&output));
+//  builder.StartLayer(std::make_unique<s2builderutil::S2PolygonLayer>(&output));
 //  builder.AddPolygon(input);
 //  S2Error error;
 //  if (!builder.Build(&error)) {
@@ -226,7 +230,7 @@ class S2Builder {
   //    crosses an edge.
   class SnapFunction {
    public:
-    virtual ~SnapFunction() {}
+    virtual ~SnapFunction() = default;
 
     // The maximum distance that vertices can move when snapped.  The snap
     // radius can be any value between zero and SnapFunction::kMaxSnapRadius().
@@ -478,9 +482,9 @@ class S2Builder {
     S2MemoryTracker* memory_tracker_ = nullptr;
   };
 
+  class Graph;
   // The following classes are only needed by Layer implementations.
   class GraphOptions;
-  class Graph;
 
   // For output layers that represent polygons, there is an ambiguity inherent
   // in spherical geometry that does not exist in planar geometry.  Namely, if
@@ -543,6 +547,7 @@ class S2Builder {
   // S2Error error;
   // S2_CHECK(builder.Build(&error)) << error;  // Builds "line1" & "line2"
   class Layer;
+
   void StartLayer(std::unique_ptr<Layer> layer);
 
   // Adds a degenerate edge (representing a point) to the current layer.
@@ -551,13 +556,13 @@ class S2Builder {
   // Adds the given edge to the current layer.
   void AddEdge(const S2Point& v0, const S2Point& v1);
 
-  // Adds the edges in the given polyline.  Note that polylines with 0 or 1
-  // vertices are defined to have no edges.
+  // Adds the edges in the given polyline to the current layer.  Note that
+  // polylines with 0 or 1 vertices are defined to have no edges.
   void AddPolyline(S2PointSpan polyline);
   void AddPolyline(const S2Polyline& polyline);
 
-  // Adds the edges in the given loop.  Note that a loop consisting of one
-  // vertex adds a single degenerate edge.
+  // Adds the edges in the given loop to the current layer.  Note that a loop
+  // consisting of one vertex adds a single degenerate edge.
   //
   // If the sign() of an S2Loop is negative (i.e. the loop represents a hole
   // within a polygon), the edge directions are automatically reversed to
@@ -565,10 +570,11 @@ class S2Builder {
   void AddLoop(S2PointLoopSpan loop);
   void AddLoop(const S2Loop& loop);
 
-  // Adds the loops in the given polygon.  Loops representing holes have their
-  // edge directions automatically reversed as described for AddLoop().  Note
-  // that this method does not distinguish between the empty and full polygons,
-  // i.e. adding a full polygon has the same effect as adding an empty one.
+  // Adds the loops in the given polygon to the current layer.  Loops
+  // representing holes have their edge directions automatically reversed as
+  // described for AddLoop().  Note that this method does not distinguish
+  // between the empty and full polygons, i.e. adding a full polygon has the
+  // same effect as adding an empty one.
   void AddPolygon(const S2Polygon& polygon);
 
   // Adds the edges of the given shape to the current layer.
@@ -587,7 +593,7 @@ class S2Builder {
   //
   // This method implicitly overrides the idempotent() option, since adding an
   // intersection point implies a desire to have nearby edges snapped to it
-  // even if these edges already satsify the S2Builder output guarantees.
+  // even if these edges already satisfy the S2Builder output guarantees.
   // (Otherwise for example edges would never be snapped to nearby
   // intersection points when the snap radius is zero.)
   //
@@ -828,18 +834,16 @@ class S2Builder {
   void InsertSiteByDistance(SiteId new_site_id, const S2Point& x,
                             gtl::compact_array<SiteId>* sites);
   void AddExtraSites(const MutableS2ShapeIndex& input_edge_index);
-  void MaybeAddExtraSites(InputEdgeId edge_id,
-                          const std::vector<SiteId>& chain,
+  void MaybeAddExtraSites(InputEdgeId edge_id, const std::vector<SiteId>& chain,
                           const MutableS2ShapeIndex& input_edge_index,
-                          gtl::dense_hash_set<InputEdgeId>* edges_to_resnap);
+                          absl::flat_hash_set<InputEdgeId>* edges_to_resnap);
   void AddExtraSite(const S2Point& new_site,
                     const MutableS2ShapeIndex& input_edge_index,
-                    gtl::dense_hash_set<InputEdgeId>* edges_to_resnap);
+                    absl::flat_hash_set<InputEdgeId>* edges_to_resnap);
   S2Point GetSeparationSite(const S2Point& site_to_avoid,
                             const S2Point& v0, const S2Point& v1,
                             InputEdgeId input_edge_id) const;
-  S2Point GetCoverageEndpoint(const S2Point& p, const S2Point& x,
-                              const S2Point& y, const S2Point& n) const;
+  S2Point GetCoverageEndpoint(const S2Point& p, const S2Point& n) const;
   void SnapEdge(InputEdgeId e, std::vector<SiteId>* chain) const;
 
   void BuildLayers();
@@ -1133,9 +1137,9 @@ class S2Builder::GraphOptions {
   SiblingPairs sibling_pairs() const;
   void set_sibling_pairs(SiblingPairs sibling_pairs);
 
-  // This is a specialized option that is only needed by clients want to work
-  // with the graphs for multiple layers at the same time (e.g., in order to
-  // check whether the same edge is present in two different graphs).  [Note
+  // This is a specialized option that is only needed by clients that want to
+  // work with the graphs for multiple layers at the same time (e.g., in order
+  // to check whether the same edge is present in two different graphs).  [Note
   // that if you need to do this, usually it is easier just to build a single
   // graph with suitable edge labels.]
   //

@@ -36,8 +36,10 @@
 #include <memory>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include "absl/types/span.h"
 #include "s2/s2loop.h"
+#include "s2/s2point.h"
 #include "s2/s2shape.h"
 
 // S2LaxLoopShape represents a closed loop of edges surrounding an interior
@@ -52,6 +54,10 @@ class S2LaxLoopShape : public S2Shape {
  public:
   // Constructs an empty loop.
   S2LaxLoopShape() : num_vertices_(0) {}
+
+  S2LaxLoopShape(S2LaxLoopShape&& other);
+
+  S2LaxLoopShape& operator=(S2LaxLoopShape&& other);
 
   // Constructs an S2LaxLoopShape with the given vertices.
   explicit S2LaxLoopShape(absl::Span<const S2Point> vertices);
@@ -115,6 +121,10 @@ class S2VertexIdLaxLoopShape : public S2Shape {
   // Constructs an empty loop.
   S2VertexIdLaxLoopShape() : num_vertices_(0) {}
 
+  S2VertexIdLaxLoopShape(S2VertexIdLaxLoopShape&& other);
+
+  S2VertexIdLaxLoopShape& operator=(S2VertexIdLaxLoopShape&& other);
+
   // Constructs the shape from the given vertex array and indices.
   // "vertex_ids" is a vector of indices into "vertex_array".
   //
@@ -125,8 +135,7 @@ class S2VertexIdLaxLoopShape : public S2Shape {
 
   // Initializes the shape from the given vertex array and indices.
   // "vertex_ids" is a vector of indices into "vertex_array".
-  void Init(absl::Span<const int32> vertex_ids,
-            const S2Point* vertex_array);
+  void Init(absl::Span<const int32> vertex_ids, const S2Point* vertex_array);
 
   // Returns the number of vertices in the loop.
   int num_vertices() const { return num_vertices_; }

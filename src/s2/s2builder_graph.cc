@@ -18,17 +18,19 @@
 #include "s2/s2builder_graph.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
-#include <memory>
 #include <numeric>
 #include <utility>
 #include <vector>
 
-#include "s2/base/logging.h"
+#include "s2/base/integral_types.h"
 #include "absl/container/btree_map.h"
 #include "s2/id_set_lexicon.h"
 #include "s2/s2builder.h"
 #include "s2/s2error.h"
+#include "s2/s2memory_tracker.h"
+#include "s2/s2point.h"
 #include "s2/s2predicates.h"
 
 using std::make_pair;
@@ -74,6 +76,12 @@ vector<Graph::EdgeId> Graph::GetInEdgeIds() const {
 vector<Graph::EdgeId> Graph::GetSiblingMap() const {
   vector<EdgeId> in_edge_ids = GetInEdgeIds();
   MakeSiblingMap(&in_edge_ids);
+  // Validates the sibling map, and indirectly the edge ordering comparator,
+  // which must break ties on equal edges correctly for the sibling map to be
+  // created correctly.
+  for (EdgeId e = 0; e < num_edges(); ++e) {
+    S2_DCHECK(e == in_edge_ids[in_edge_ids[e]]);
+  }
   return in_edge_ids;
 }
 
@@ -174,15 +182,13 @@ vector<Graph::EdgeId> Graph::GetInputEdgeOrder(
 
 // A struct for sorting the incoming and outgoing edges around a vertex "v0".
 struct VertexEdge {
-  VertexEdge(bool _incoming, Graph::EdgeId _index,
-             Graph::VertexId _endpoint, int32 _rank)
-      : incoming(_incoming), index(_index),
-        endpoint(_endpoint), rank(_rank) {
-  }
+  VertexEdge(bool _incoming, Graph::EdgeId _index, Graph::VertexId _endpoint,
+             int32 _rank)
+      : incoming(_incoming), index(_index), endpoint(_endpoint), rank(_rank) {}
   bool incoming;             // Is this an incoming edge to "v0"?
   Graph::EdgeId index;       // Index of this edge in "edges_" or "in_edge_ids"
   Graph::VertexId endpoint;  // The other (not "v0") endpoint of this edge
-  int32 rank;                // Secondary key for edges with the same endpoint
+  int32 rank;              // Secondary key for edges with the same endpoint
 };
 
 // Given a set of duplicate outgoing edges (v0, v1) and a set of duplicate
@@ -329,9 +335,9 @@ void Graph::CanonicalizeLoopOrder(const vector<InputEdgeId>& min_input_ids,
   // This has the advantage that if an undirected loop is assembled with the
   // wrong orientation and later inverted (e.g. by S2Polygon::InitOriented),
   // we still end up preserving the original cyclic vertex order.
-  int pos = 0;
+  size_t pos = 0;
   bool saw_gap = false;
-  for (int i = 1; i < loop->size(); ++i) {
+  for (size_t i = 1; i < loop->size(); ++i) {
     int cmp = min_input_ids[(*loop)[i]] - min_input_ids[(*loop)[pos]];
     if (cmp < 0) {
       saw_gap = true;
@@ -462,7 +468,7 @@ bool Graph::GetDirectedComponents(
 
           // Common special case: the edge and its sibling are adjacent, in
           // which case we can simply remove them from the path and continue.
-          if (sibling_index == path.size() - 2) {
+          if (static_cast<size_t>(sibling_index) == path.size() - 2) {
             path.resize(sibling_index);
             // We don't need to update "path_index" for these two edges
             // because both edges of the sibling pair have now been used.
@@ -754,7 +760,7 @@ vector<Graph::EdgePolyline> Graph::PolylineBuilder::BuildWalks() {
   // start from the edge with minimum input edge id.  If the minimal input
   // edge was split into several edges, then we start from the first edge of
   // the chain.
-  for (int i = 0; i < edges.size() && edges_left_ > 0; ++i) {
+  for (size_t i = 0; i < edges.size() && edges_left_ > 0; ++i) {
     EdgeId e = edges[i];
     if (used_[e]) continue;
 
@@ -765,7 +771,8 @@ vector<Graph::EdgePolyline> Graph::PolylineBuilder::BuildWalks() {
     VertexId v = g_.edge(e).first;
     InputEdgeId id = min_input_ids_[e];
     int excess = 0;
-    for (int j = i; j < edges.size() && min_input_ids_[edges[j]] == id; ++j) {
+    for (size_t j = i; j < edges.size() && min_input_ids_[edges[j]] == id;
+         ++j) {
       EdgeId e2 = edges[j];
       if (used_[e2]) continue;
       if (g_.edge(e2).first == v) ++excess;
@@ -822,7 +829,7 @@ void Graph::PolylineBuilder::MaximizeWalk(EdgePolyline* polyline) {
   // and insert it into the polyline.  (The walk is guaranteed to be a loop
   // because this method is only called when all vertices have equal numbers
   // of unused incoming and outgoing edges.)
-  for (int i = 0; i <= polyline->size(); ++i) {
+  for (size_t i = 0; i <= polyline->size(); ++i) {
     VertexId v = (i == 0 ? g_.edge((*polyline)[i]).first
                   : g_.edge((*polyline)[i - 1]).second);
     for (EdgeId e : out_.edge_ids(v)) {
@@ -865,10 +872,10 @@ class Graph::EdgeProcessor {
   vector<InputEdgeId> tmp_ids_;
 };
 
-void Graph::ProcessEdges(
-    GraphOptions* options, std::vector<Edge>* edges,
-    std::vector<InputEdgeIdSetId>* input_ids, IdSetLexicon* id_set_lexicon,
-    S2Error* error, S2MemoryTracker::Client* tracker) {
+void Graph::ProcessEdges(GraphOptions* options, vector<Edge>* edges,
+                         vector<InputEdgeIdSetId>* input_ids,
+                         IdSetLexicon* id_set_lexicon, S2Error* error,
+                         S2MemoryTracker::Client* tracker) {
   // Graph::EdgeProcessor uses 8 bytes per input edge (out_edges_ and
   // in_edges_) plus 12 bytes per output edge (new_edges_, new_input_ids_).
   // For simplicity we assume that num_input_edges == num_output_edges, since
@@ -1085,7 +1092,7 @@ void Graph::EdgeProcessor::Run(S2Error* error) {
 
 // LINT.IfChange
 vector<S2Point> Graph::FilterVertices(const vector<S2Point>& vertices,
-                                      std::vector<Edge>* edges,
+                                      vector<Edge>* edges,
                                       vector<VertexId>* tmp) {
   // Gather the vertices that are actually used.
   vector<VertexId> used;
@@ -1103,7 +1110,7 @@ vector<S2Point> Graph::FilterVertices(const vector<S2Point>& vertices,
   vector<VertexId>& vmap = *tmp;
   vmap.resize(vertices.size());
   vector<S2Point> new_vertices(used.size());
-  for (int i = 0; i < used.size(); ++i) {
+  for (size_t i = 0; i < used.size(); ++i) {
     new_vertices[i] = vertices[used[i]];
     vmap[used[i]] = i;
   }

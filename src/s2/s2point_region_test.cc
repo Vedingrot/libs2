@@ -18,6 +18,7 @@
 #include "s2/s2point_region.h"
 
 #include <memory>
+#include <string>
 
 #include <gtest/gtest.h>
 #include "s2/util/coding/coder.h"
@@ -25,6 +26,7 @@
 #include "s2/s2cell.h"
 #include "s2/s2latlng.h"
 #include "s2/s2latlng_rect.h"
+#include "s2/s2point.h"
 
 using std::unique_ptr;
 
@@ -58,7 +60,7 @@ TEST(S2PointRegionTest, EncodeAndDecode) {
 
   Decoder decoder(encoder.base(), encoder.length());
   S2PointRegion decoded_r(S2Point(1, 0, 0));
-  decoded_r.Decode(&decoder);
+  ASSERT_TRUE(decoded_r.Decode(&decoder));
   S2Point decoded_p = decoded_r.point();
 
   EXPECT_EQ(0.6, decoded_p[0]);

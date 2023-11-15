@@ -17,24 +17,34 @@
 
 #include "s2/s2edge_crossings.h"
 
+#include <cstdio>
+
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "s2/base/logging.h"
 #include <gtest/gtest.h>
 #include "s2/base/log_severity.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
+#include "s2/s1angle.h"
+#include "s2/s1chord_angle.h"
 #include "s2/s2edge_crossings_internal.h"
 #include "s2/s2edge_distances.h"
+#include "s2/s2point.h"
 #include "s2/s2point_span.h"
+#include "s2/s2pointutil.h"
 #include "s2/s2predicates.h"
 #include "s2/s2predicates_internal.h"
 #include "s2/s2testing.h"
 #include "s2/util/math/exactfloat/exactfloat.h"
 
-using S2::internal::GetStableCrossProd;
+using absl::string_view;
 using S2::internal::ExactCrossProd;
+using S2::internal::GetStableCrossProd;
 using S2::internal::SymbolicCrossProd;
 using s2pred::DBL_ERR;
 using s2pred::LD_ERR;
@@ -49,9 +59,8 @@ namespace {
 
 enum Precision { DOUBLE, LONG_DOUBLE, EXACT, SYMBOLIC, NUM_PRECISIONS };
 
-const char* kPrecisionNames[] = {
-  "double", "long double", "exact", "symbolic"
-};
+constexpr string_view kPrecisionNames[] = {"double", "long double", "exact",
+                                           "symbolic"};
 
 // A helper class that keeps track of how often each precision was used and
 // generates a string for logging purposes.
@@ -161,7 +170,8 @@ void TestRobustCrossProd(const S2Point& a, const S2Point& b,
                          Precision expected_prec) {
   EXPECT_EQ(s2pred::Sign(a, b, expected_result), 1);
   EXPECT_EQ(S2::RobustCrossProd(a, b).Normalize(), expected_result);
-  EXPECT_EQ(TestRobustCrossProdError(a, b), expected_prec);
+  EXPECT_EQ(TestRobustCrossProdError(a, b), expected_prec)
+      << "a: " << a << " b: " << b;
 }
 
 TEST(S2, RobustCrossProdCoverage) {
@@ -176,12 +186,16 @@ TEST(S2, RobustCrossProdCoverage) {
                       S2Point(0, 0, 1), DOUBLE);
   TestRobustCrossProd(S2Point(20 * DBL_ERR, 1, 0), S2Point(0, 1, 0),
                       S2Point(0, 0, 1), DOUBLE);
+  // If `long double` is the same as `double`, such as on armv7, we'll
+  // get `EXACT` instead of `LONG_DOUBLE`.
+  constexpr Precision kLongDoublePrecision =
+      s2pred::kHasLongDouble ? LONG_DOUBLE : EXACT;
   TestRobustCrossProd(S2Point(16 * DBL_ERR, 1, 0), S2Point(0, 1, 0),
-                      S2Point(0, 0, 1), LONG_DOUBLE);
+                      S2Point(0, 0, 1), kLongDoublePrecision);
 
   // The following bounds hold for both 80-bit and "double double" precision.
   TestRobustCrossProd(S2Point(5 * LD_ERR, 1, 0), S2Point(0, 1, 0),
-                      S2Point(0, 0, 1), LONG_DOUBLE);
+                      S2Point(0, 0, 1), kLongDoublePrecision);
   TestRobustCrossProd(S2Point(4 * LD_ERR, 1, 0), S2Point(0, 1, 0),
                       S2Point(0, 0, 1), EXACT);
 
@@ -370,12 +384,14 @@ class GetIntersectionStats {
            "Method", "Successes", "Attempts", "Rate");
     for (int i = 0; i < kNumMethods; ++i) {
       if (tally_[i] == 0) continue;
-      printf("%10s %9d %5.1f%% %9d %5.1f%%  %5.1f%%\n",
-             S2::internal::GetIntersectionMethodName(
-                 static_cast<IntersectionMethod>(i)),
-             tally_[i], 100.0 * tally_[i] / total,
-             totals[i], 100.0 * totals[i] / total,
-             100.0 * tally_[i] / totals[i]);
+      // Use `StrFormat` to handle `string_view`.
+      puts(absl::StrFormat("%10s %9d %5.1f%% %9d %5.1f%%  %5.1f%%",
+                           S2::internal::GetIntersectionMethodName(
+                               static_cast<IntersectionMethod>(i)),
+                           tally_[i], 100.0 * tally_[i] / total, totals[i],
+                           100.0 * totals[i] / total,
+                           100.0 * tally_[i] / totals[i])
+               .c_str());
     }
     for (int i = 0; i < kNumMethods; ++i) tally_[i] = 0;
   }
@@ -419,7 +435,7 @@ TEST(S2, IntersectionError) {
     //
     // Sometimes the edges we generate will not actually cross, in which case
     // we simply try again.
-    Vector3_d p, d1, d2;
+    S2Point p, d1, d2;
     S2Testing::GetRandomFrame(&p, &d1, &d2);
     double slope = 1e-15 * pow(1e30, rnd->RandDouble());
     d2 = (d1 + slope * d2).Normalize();
@@ -492,7 +508,7 @@ TEST(S2, GrazingIntersections) {
   // along AB (to within kIntersectionError).
   GetIntersectionStats stats;
   for (int iter = 0; iter < 1000; ++iter) {
-    Vector3_d x, y, z;
+    S2Point x, y, z;
     S2Testing::GetRandomFrame(&x, &y, &z);
     S2Point a, b, c, d, e, ab;
     do {

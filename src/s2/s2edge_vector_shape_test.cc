@@ -17,9 +17,18 @@
 
 #include "s2/s2edge_vector_shape.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <gtest/gtest.h>
 #include "absl/flags/flag.h"
+#include "s2/s2point.h"
+#include "s2/s2shape.h"
+#include "s2/s2shapeutil_testing.h"
 #include "s2/s2testing.h"
+
+using std::vector;
 
 TEST(S2EdgeVectorShape, Empty) {
   S2EdgeVectorShape shape;
@@ -31,11 +40,37 @@ TEST(S2EdgeVectorShape, Empty) {
   EXPECT_FALSE(shape.GetReferencePoint().contained);
 }
 
+TEST(S2EdgeVectorShape, Move) {
+  // Construct a shape to use as the correct answer and a second identical shape
+  // to be moved.
+  S2EdgeVectorShape correct;
+  S2EdgeVectorShape to_move;
+  S2Testing::rnd.Reset(absl::GetFlag(FLAGS_s2_random_seed));
+  const int kNumEdges = 100;
+  for (int i = 0; i < kNumEdges; ++i) {
+    const S2Point start_point = S2Testing::RandomPoint();
+    const S2Point end_point = S2Testing::RandomPoint();
+    correct.Add(start_point, end_point);
+    to_move.Add(start_point, end_point);
+  }
+
+  // Test the move constructor.
+  S2EdgeVectorShape move1(std::move(to_move));
+  s2testing::ExpectEqual(correct, move1);
+  EXPECT_EQ(correct.id(), move1.id());
+
+  // Test the move-assignment operator.
+  S2EdgeVectorShape move2;
+  move2 = std::move(move1);
+  s2testing::ExpectEqual(correct, move2);
+  EXPECT_EQ(correct.id(), move2.id());
+}
+
 TEST(S2EdgeVectorShape, EdgeAccess) {
   S2EdgeVectorShape shape;
   S2Testing::rnd.Reset(absl::GetFlag(FLAGS_s2_random_seed));
   const int kNumEdges = 100;
-  std::vector<std::pair<S2Point, S2Point>> edges;
+  vector<std::pair<S2Point, S2Point>> edges;
   for (int i = 0; i < kNumEdges; ++i) {
     S2Point a = S2Testing::RandomPoint();  // Control the evaluation order
     edges.emplace_back(a, S2Testing::RandomPoint());

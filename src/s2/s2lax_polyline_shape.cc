@@ -21,19 +21,27 @@
 #include <memory>
 #include <utility>
 
-#include "s2/base/logging.h"
+#include "absl/types/span.h"
 #include "absl/utility/utility.h"
+#include "s2/util/coding/coder.h"
+#include "s2/encoded_s2point_vector.h"
+#include "s2/s2coder.h"
+#include "s2/s2error.h"
+#include "s2/s2point.h"
 #include "s2/s2polyline.h"
+#include "s2/s2shape.h"
 
-using absl::make_unique;
 using absl::MakeSpan;
 using absl::Span;
+using std::make_unique;
 
-S2LaxPolylineShape::S2LaxPolylineShape(S2LaxPolylineShape&& other) :
-  num_vertices_(absl::exchange(other.num_vertices_, 0)),
-  vertices_(std::move(other.vertices_)) {}
+S2LaxPolylineShape::S2LaxPolylineShape(S2LaxPolylineShape&& other)
+    : S2Shape(std::move(other)),
+      num_vertices_(absl::exchange(other.num_vertices_, 0)),
+      vertices_(std::move(other.vertices_)) {}
 
 S2LaxPolylineShape& S2LaxPolylineShape::operator=(S2LaxPolylineShape&& other) {
+  S2Shape::operator=(static_cast<S2Shape&&>(other));
   num_vertices_ = absl::exchange(other.num_vertices_, 0);
   vertices_ = std::move(other.vertices_);
   return *this;
@@ -77,6 +85,15 @@ bool S2LaxPolylineShape::Init(Decoder* decoder) {
   vertices_ = make_unique<S2Point[]>(vertices.size());
   for (int i = 0; i < num_vertices_; ++i) {
     vertices_[i] = vertices[i];
+  }
+  return true;
+}
+
+bool S2LaxPolylineShape::Init(Decoder* decoder, S2Error& error) {
+  if (!Init(decoder)) {
+    error.Init(S2Error::DATA_LOSS,
+               "Unknown error occurred decoding S2LaxPolylineShape");
+    return false;
   }
   return true;
 }

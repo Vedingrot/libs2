@@ -17,15 +17,26 @@
 
 #include "s2/s2shapeutil_conversion.h"
 
+#include <memory>
 #include <utility>
+#include <vector>
 
+#include "s2/s2loop.h"
+#include "s2/s2point.h"
+#include "s2/s2polygon.h"
+#include "s2/s2polyline.h"
+#include "s2/s2shape.h"
 #include "s2/s2shape_measures.h"
 
 namespace s2shapeutil {
 
-std::vector<S2Point> ShapeToS2Points(const S2Shape& multipoint) {
+using std::make_unique;
+using std::unique_ptr;
+using std::vector;
+
+vector<S2Point> ShapeToS2Points(const S2Shape& multipoint) {
   S2_DCHECK_EQ(multipoint.dimension(), 0);
-  std::vector<S2Point> points;
+  vector<S2Point> points;
   points.reserve(multipoint.num_edges());
   for (int i = 0; i < multipoint.num_edges(); ++i) {
     points.push_back(multipoint.edge(i).v0);
@@ -33,27 +44,26 @@ std::vector<S2Point> ShapeToS2Points(const S2Shape& multipoint) {
   return points;
 }
 
-std::unique_ptr<S2Polyline> ShapeToS2Polyline(const S2Shape& line) {
+unique_ptr<S2Polyline> ShapeToS2Polyline(const S2Shape& line) {
   S2_DCHECK_EQ(line.dimension(), 1);
   S2_DCHECK_EQ(line.num_chains(), 1);
-  std::vector<S2Point> vertices;
+  vector<S2Point> vertices;
   S2::GetChainVertices(line, 0, &vertices);
-  return absl::make_unique<S2Polyline>(std::move(vertices));
+  return make_unique<S2Polyline>(std::move(vertices));
 }
 
-std::unique_ptr<S2Polygon> ShapeToS2Polygon(const S2Shape& poly) {
+unique_ptr<S2Polygon> ShapeToS2Polygon(const S2Shape& poly) {
   if (poly.is_full()) {
-    return absl::make_unique<S2Polygon>(
-        absl::make_unique<S2Loop>(S2Loop::kFull()));
+    return make_unique<S2Polygon>(make_unique<S2Loop>(S2Loop::kFull()));
   }
   S2_DCHECK_EQ(poly.dimension(), 2);
-  std::vector<std::unique_ptr<S2Loop>> loops;
-  std::vector<S2Point> vertices;
+  vector<unique_ptr<S2Loop>> loops;
+  vector<S2Point> vertices;
   for (int i = 0; i < poly.num_chains(); ++i) {
     S2::GetChainVertices(poly, i, &vertices);
-    loops.push_back(absl::make_unique<S2Loop>(vertices));
+    loops.push_back(make_unique<S2Loop>(vertices));
   }
-  auto output_poly = absl::make_unique<S2Polygon>();
+  auto output_poly = make_unique<S2Polygon>();
   output_poly->InitOriented(std::move(loops));
 
   return output_poly;

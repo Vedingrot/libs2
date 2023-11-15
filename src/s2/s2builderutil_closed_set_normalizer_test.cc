@@ -24,7 +24,6 @@
 
 #include <gtest/gtest.h>
 
-#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 
 #include "s2/mutable_s2shape_index.h"
@@ -36,9 +35,14 @@
 #include "s2/s2builderutil_s2polygon_layer.h"
 #include "s2/s2builderutil_s2polyline_vector_layer.h"
 #include "s2/s2builderutil_testing.h"
+#include "s2/s2error.h"
+#include "s2/s2point.h"
+#include "s2/s2shape.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
+using absl::string_view;
+using std::make_unique;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -77,7 +81,7 @@ class NormalizeTest : public testing::Test {
                      DuplicateEdges::KEEP, SiblingPairs::KEEP));
   }
 
-  void Run(const string& input_str, const string& expected_str);
+  void Run(string_view input_str, string_view expected_str);
 
  protected:
   bool suppress_lower_dimensions_;
@@ -85,15 +89,13 @@ class NormalizeTest : public testing::Test {
 
  private:
   static string ToString(const Graph& g);
-  void AddLayers(absl::string_view str,
-                 const vector<GraphOptions>& graph_options,
+  void AddLayers(string_view str, const vector<GraphOptions>& graph_options,
                  vector<Graph>* graphs_out, S2Builder* builder);
 
   vector<unique_ptr<GraphClone>> graph_clones_;
 };
 
-void NormalizeTest::Run(const string& input_str,
-                        const string& expected_str) {
+void NormalizeTest::Run(string_view input_str, string_view expected_str) {
   ClosedSetNormalizer::Options options;
   options.set_suppress_lower_dimensions(suppress_lower_dimensions_);
   ClosedSetNormalizer normalizer(options, graph_options_out_);
@@ -113,7 +115,7 @@ void NormalizeTest::Run(const string& input_str,
   }
 }
 
-void NormalizeTest::AddLayers(absl::string_view str,
+void NormalizeTest::AddLayers(string_view str,
                               const vector<GraphOptions>& graph_options,
                               vector<Graph>* graphs_out, S2Builder* builder) {
   auto index = s2textformat::MakeIndexOrDie(str);

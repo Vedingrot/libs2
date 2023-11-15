@@ -19,19 +19,23 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
-#include "absl/memory/memory.h"
-#include "s2/encoded_s2point_vector.h"
+#include "s2/base/integral_types.h"
+#include "s2/util/coding/coder.h"
 #include "s2/encoded_string_vector.h"
+#include "s2/s2coder.h"
 #include "s2/s2lax_polygon_shape.h"
 #include "s2/s2lax_polyline_shape.h"
 #include "s2/s2point_vector_shape.h"
 #include "s2/s2polygon.h"
 #include "s2/s2polyline.h"
+#include "s2/s2shape.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2wrapped_shape.h"
 
-using absl::make_unique;
 using std::make_shared;
+using std::make_unique;
 using std::unique_ptr;
 using std::vector;
 
@@ -42,7 +46,7 @@ namespace s2shapeutil {
 bool FastEncodeShape(const S2Shape& shape, Encoder* encoder) {
   uint32 tag = shape.type_tag();
   if (tag == S2Shape::kNoTypeTag) {
-    S2_LOG(DFATAL) << "Unsupported S2Shape type: " << tag;
+    S2_LOG(ERROR) << "Unsupported S2Shape type: " << tag;
     return false;
   }
   // Update the following constant when adding new S2Shape encodings.
@@ -54,7 +58,7 @@ bool FastEncodeShape(const S2Shape& shape, Encoder* encoder) {
 bool CompactEncodeShape(const S2Shape& shape, Encoder* encoder) {
   uint32 tag = shape.type_tag();
   if (tag == S2Shape::kNoTypeTag) {
-    S2_LOG(DFATAL) << "Unsupported S2Shape type: " << tag;
+    S2_LOG(ERROR) << "Unsupported S2Shape type: " << tag;
     return false;
   }
   // Update the following constant when adding new S2Shape encodings.
@@ -94,7 +98,7 @@ unique_ptr<S2Shape> FullDecodeShape(S2Shape::TypeTag tag, Decoder* decoder) {
       return std::move(shape);  // Converts to S2Shape.
     }
     default: {
-      S2_LOG(DFATAL) << "Unsupported S2Shape type: " << tag;
+      S2_LOG(ERROR) << "Unsupported S2Shape type: " << tag;
       return nullptr;
     }
   }
@@ -178,7 +182,7 @@ unique_ptr<S2Shape> VectorShapeFactory::operator[](int shape_id) const {
   return std::move((*shared_shapes_)[shape_id]);
 }
 
-VectorShapeFactory SingletonShapeFactory(std::unique_ptr<S2Shape> shape) {
+VectorShapeFactory SingletonShapeFactory(unique_ptr<S2Shape> shape) {
   vector<unique_ptr<S2Shape>> shapes;
   shapes.push_back(std::move(shape));
   return VectorShapeFactory(std::move(shapes));

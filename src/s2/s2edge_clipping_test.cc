@@ -20,22 +20,29 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <string>
+#include <vector>
 
-#include "s2/base/logging.h"
 #include <gtest/gtest.h>
+#include "absl/container/inlined_vector.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "s2/r1interval.h"
+#include "s2/r2.h"
 #include "s2/r2rect.h"
-#include "s2/s1chord_angle.h"
 #include "s2/s1interval.h"
+#include "s2/s2cell.h"
 #include "s2/s2coords.h"
 #include "s2/s2edge_crossings.h"
-#include "s2/s2pointutil.h"
+#include "s2/s2point.h"
+#include "s2/s2shape.h"
 #include "s2/s2testing.h"
 
 using absl::StrCat;
+using absl::string_view;
 using std::fabs;
 using std::max;
+using std::vector;
 
 void TestFaceClipping(const S2Point& a_raw, const S2Point& b_raw) {
   S2Point a = a_raw.Normalize();
@@ -64,6 +71,13 @@ void TestFaceClipping(const S2Point& a_raw, const S2Point& b_raw) {
             kErrorRadians);
   EXPECT_LE(b.Angle(S2::FaceUVtoXYZ(segments[n-1].face, segments[n-1].b)),
             kErrorRadians);
+
+  // Similarly, in UV space.
+  R2Point a_uv, b_uv;
+  EXPECT_TRUE(S2::FaceXYZtoUV(segments[0].face, a, &a_uv));
+  EXPECT_TRUE(S2::FaceXYZtoUV(segments[n-1].face, b, &b_uv));
+  EXPECT_LE((a_uv - segments[0].a).Norm(), S2::kFaceClipErrorUVDist);
+  EXPECT_LE((b_uv - segments[n-1].b).Norm(), S2::kFaceClipErrorUVDist);
 
   S2Point norm = S2::RobustCrossProd(a, b).Normalize();
   S2Point a_tangent = norm.CrossProd(a);

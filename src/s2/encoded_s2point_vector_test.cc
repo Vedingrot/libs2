@@ -17,8 +17,15 @@
 
 #include "s2/encoded_s2point_vector.h"
 
+#include <cstddef>
+#include <cstdio>
+
+#include <cstring>
+#include <memory>
+#include <string>
 #include <vector>
 
+#include "s2/base/integral_types.h"
 #include <gtest/gtest.h>
 
 #include "absl/flags/flag.h"
@@ -26,15 +33,19 @@
 
 #include "s2/base/log_severity.h"
 #include "s2/util/bits/bit-interleave.h"
+#include "s2/util/coding/coder.h"
+#include "s2/s2cell_id.h"
+#include "s2/s2coder.h"
+#include "s2/s2coords.h"
 #include "s2/s2loop.h"
+#include "s2/s2point.h"
 #include "s2/s2polygon.h"
-#include "s2/s2shape.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 
-using absl::make_unique;
 using s2textformat::MakeCellIdOrDie;
 using s2textformat::MakePointOrDie;
+using std::make_unique;
 using std::vector;
 
 namespace s2coding {
@@ -48,7 +59,14 @@ size_t TestEncodedS2PointVector(const vector<S2Point>& expected,
   if (expected_bytes >= 0) {
     EXPECT_EQ(expected_bytes, encoder.length());
   }
-  Decoder decoder(encoder.base(), encoder.length());
+
+  // Allocate storage aligned to double.  Since there is a varint at the
+  // beginning of the encoding, the following S2Points will be unaligned,
+  // so we test unaligned S2Point access for UNCOMPRESSED encodings.
+  auto aligned = make_unique<double[]>(encoder.length() / sizeof(double) + 1);
+  std::memcpy(aligned.get(), encoder.base(), encoder.length());
+
+  Decoder decoder(aligned.get(), encoder.length());
   EncodedS2PointVector actual;
   EXPECT_TRUE(actual.Init(&decoder));
   EXPECT_EQ(actual.Decode(), expected);
@@ -365,7 +383,7 @@ TEST(EncodedS2PointVectorTest, SnappedFractalLoops) {
       fractal.SetLevelForApproxMaxEdges(num_points);
       auto frame = S2Testing::GetRandomFrame();
       auto loop = fractal.MakeLoop(frame, S2Testing::KmToAngle(10));
-      std::vector<S2Point> points;
+      vector<S2Point> points;
       for (int j = 0; j < loop->num_vertices(); ++j) {
         points.push_back(S2CellId(loop->vertex(j)).ToPoint());
       }
@@ -377,7 +395,7 @@ TEST(EncodedS2PointVectorTest, SnappedFractalLoops) {
       lax_polygon_size +=
           TestEncodedS2PointVector(points, CodingHint::COMPACT, -1) + 2;
     }
-    printf("n=%5d  s2=%9" PRIuS "  lax=%9" PRIuS "\n",
+    printf("n=%5d  s2=%9zu  lax=%9zu\n",
            num_points, s2polygon_size, lax_polygon_size);
   }
 }
@@ -402,7 +420,7 @@ void TestRoundtripEncoding(s2coding::CodingHint hint) {
   {
     EncodeS2PointVector(points, hint, &a_encoder);
     Decoder decoder(a_encoder.base(), a_encoder.length());
-    a_vector.Init(&decoder);
+    ASSERT_TRUE(a_vector.Init(&decoder));
   }
   ASSERT_EQ(points, a_vector.Decode());
 
@@ -410,7 +428,7 @@ void TestRoundtripEncoding(s2coding::CodingHint hint) {
   {
     a_vector.Encode(&b_encoder);
     Decoder decoder(b_encoder.base(), b_encoder.length());
-    b_vector.Init(&decoder);
+    ASSERT_TRUE(b_vector.Init(&decoder));
   }
   EXPECT_EQ(points, b_vector.Decode());
 }

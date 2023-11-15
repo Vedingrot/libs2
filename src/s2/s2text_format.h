@@ -27,20 +27,24 @@
 #include <string>
 #include <vector>
 
-#include "absl/base/attributes.h"
 #include "absl/base/macros.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 
+#include "s2/mutable_s2shape_index.h"
 #include "s2/s2cell_id.h"
 #include "s2/s2cell_union.h"
 #include "s2/s2debug.h"
+#include "s2/s2latlng.h"
 #include "s2/s2latlng_rect.h"
 #include "s2/s2lax_polygon_shape.h"  // TODO(user,b/207351837): Remove.
 #include "s2/s2lax_polyline_shape.h"  // TODO(user,b/207351837): Remove.
+#include "s2/s2loop.h"
+#include "s2/s2point.h"
 #include "s2/s2point_span.h"
 #include "s2/s2polygon.h"   // TODO(user,b/207351837): Remove.
 #include "s2/s2polyline.h"  // TODO(user,b/207351837): Remove.
+#include "s2/s2shape_index.h"
 
 class MutableS2ShapeIndex;
 class S2LaxPolygonShape;
@@ -75,7 +79,7 @@ std::vector<S2LatLng> ParseLatLngsOrDie(absl::string_view str);
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
 ABSL_MUST_USE_RESULT bool ParseLatLngs(absl::string_view str,
-                                       std::vector<S2LatLng>* latlngs);
+                                std::vector<S2LatLng>* latlngs);
 
 ABSL_DEPRECATED("Inline the implementation")
 inline std::vector<S2LatLng> ParseLatLngs(absl::string_view str) {
@@ -89,7 +93,7 @@ std::vector<S2Point> ParsePointsOrDie(absl::string_view str);
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
 ABSL_MUST_USE_RESULT bool ParsePoints(absl::string_view str,
-                                      std::vector<S2Point>* vertices);
+                               std::vector<S2Point>* vertices);
 
 // Given a string in the same format as ParseLatLngs, returns a single S2LatLng.
 S2LatLng MakeLatLngOrDie(absl::string_view str);
@@ -104,8 +108,7 @@ S2LatLngRect MakeLatLngRectOrDie(absl::string_view str);
 
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
-ABSL_MUST_USE_RESULT bool MakeLatLngRect(absl::string_view str,
-                                         S2LatLngRect* rect);
+ABSL_MUST_USE_RESULT bool MakeLatLngRect(absl::string_view str, S2LatLngRect* rect);
 
 ABSL_DEPRECATED("Inline the implementation")
 inline S2LatLngRect MakeLatLngRect(absl::string_view str) {
@@ -136,7 +139,7 @@ S2CellUnion MakeCellUnionOrDie(absl::string_view str);
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
 ABSL_MUST_USE_RESULT bool MakeCellUnion(absl::string_view str,
-                                        S2CellUnion* cell_union);
+                                 S2CellUnion* cell_union);
 
 // Given a string of latitude-longitude coordinates in degrees,
 // returns a newly allocated loop.  Example of the input format:
@@ -148,8 +151,8 @@ std::unique_ptr<S2Loop> MakeLoopOrDie(absl::string_view str,
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
 ABSL_MUST_USE_RESULT bool MakeLoop(absl::string_view str,
-                                   std::unique_ptr<S2Loop>* loop,
-                                   S2Debug debug_override = S2Debug::ALLOW);
+                            std::unique_ptr<S2Loop>* loop,
+                            S2Debug debug_override = S2Debug::ALLOW);
 
 // Similar to MakeLoop(), but returns an S2Polyline rather than an S2Loop.
 std::unique_ptr<S2Polyline> MakePolylineOrDie(
@@ -159,8 +162,8 @@ std::unique_ptr<S2Polyline> MakePolylineOrDie(
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
 ABSL_MUST_USE_RESULT bool MakePolyline(absl::string_view str,
-                                       std::unique_ptr<S2Polyline>* polyline,
-                                       S2Debug debug_override = S2Debug::ALLOW);
+                                std::unique_ptr<S2Polyline>* polyline,
+                                S2Debug debug_override = S2Debug::ALLOW);
 
 // Like MakePolyline, but returns an S2LaxPolylineShape instead.
 std::unique_ptr<S2LaxPolylineShape> MakeLaxPolylineOrDie(absl::string_view str);
@@ -190,8 +193,8 @@ std::unique_ptr<S2Polygon> MakePolygonOrDie(
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
 ABSL_MUST_USE_RESULT bool MakePolygon(absl::string_view str,
-                                      std::unique_ptr<S2Polygon>* polygon,
-                                      S2Debug debug_override = S2Debug::ALLOW);
+                               std::unique_ptr<S2Polygon>* polygon,
+                               S2Debug debug_override = S2Debug::ALLOW);
 
 ABSL_DEPRECATED("Inline the implementation")
 inline std::unique_ptr<S2Polygon> MakePolygon(
@@ -205,8 +208,8 @@ std::unique_ptr<S2Polygon> MakeVerbatimPolygonOrDie(absl::string_view str);
 
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
-ABSL_MUST_USE_RESULT bool MakeVerbatimPolygon(
-    absl::string_view str, std::unique_ptr<S2Polygon>* polygon);
+ABSL_MUST_USE_RESULT bool MakeVerbatimPolygon(absl::string_view str,
+                                       std::unique_ptr<S2Polygon>* polygon);
 
 // Parses a string in the same format as MakePolygon, except that loops must
 // be oriented so that the interior of the loop is always on the left, and
@@ -247,31 +250,37 @@ std::unique_ptr<MutableS2ShapeIndex> MakeIndexOrDie(absl::string_view str);
 
 // As above, but does not S2_CHECK-fail on invalid input. Returns true if
 // conversion is successful.
-ABSL_MUST_USE_RESULT bool MakeIndex(
-    absl::string_view str, std::unique_ptr<MutableS2ShapeIndex>* index);
+ABSL_MUST_USE_RESULT bool MakeIndex(absl::string_view str,
+                             std::unique_ptr<MutableS2ShapeIndex>* index);
 
 // Convert an S2Point, S2LatLng, S2LatLngRect, S2CellId, S2CellUnion, loop,
 // polyline, or polygon to the string format above.
 std::string ToString(const S2Point& point);
 std::string ToString(const S2LatLng& latlng);
 std::string ToString(const S2LatLngRect& rect);
-std::string ToString(const S2CellId& cell_id);
+std::string ToString(const S2CellId cell_id);
 std::string ToString(const S2CellUnion& cell_union);
 std::string ToString(const S2Loop& loop);
 std::string ToString(const S2Polyline& polyline);
 std::string ToString(const S2Polygon& polygon,
-                     const char* loop_separator = ";\n");
+                     absl::string_view loop_separator = ";\n");
 std::string ToString(absl::Span<const S2Point> points);
 std::string ToString(absl::Span<const S2LatLng> latlngs);
 std::string ToString(const S2LaxPolylineShape& polyline);
 std::string ToString(const S2LaxPolygonShape& polygon,
-                     const char* loop_separator = ";\n");
+                     absl::string_view loop_separator = ";\n");
+
+// Convert any S2Shape to the string format above.
+std::string ToString(const S2Shape& shape);
 
 // Convert the contents of an S2ShapeIndex to the format above.  The index may
 // contain S2Shapes of any type.  Shapes are reordered if necessary so that
 // all point geometry (shapes of dimension 0) are first, followed by all
 // polyline geometry, followed by all polygon geometry.
-std::string ToString(const S2ShapeIndex& index);
+// If `roundtrip_precision` is true, the coordinates are formatted using
+// enough precision to exactly preserve the floating point values.
+std::string ToString(const S2ShapeIndex& index,
+                     bool roundtrip_precision = false);
 
 }  // namespace s2textformat
 

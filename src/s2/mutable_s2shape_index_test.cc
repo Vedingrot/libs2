@@ -17,8 +17,10 @@
 
 #include "s2/mutable_s2shape_index.h"
 
+#include <cmath>
+#include <cstddef>
+
 #include <algorithm>
-#include <functional>
 #include <memory>
 #include <numeric>
 #include <thread>
@@ -28,43 +30,48 @@
 
 #include <gtest/gtest.h>
 
-#include "absl/flags/reflection.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
+#include "absl/flags/reflection.h"
 #include "absl/strings/str_format.h"
 
 #include "s2/base/commandlineflags.h"
+#include "s2/base/commandlineflags_declare.h"
 #include "s2/base/logging.h"
 #include "s2/base/log_severity.h"
 #include "s2/r2.h"
 #include "s2/r2rect.h"
 #include "s2/s1angle.h"
-#include "s2/s2cap.h"
 #include "s2/s2cell.h"
 #include "s2/s2cell_id.h"
 #include "s2/s2cell_union.h"
-#include "s2/s2debug.h"
+#include "s2/s2coords.h"
 #include "s2/s2edge_clipping.h"
-#include "s2/s2edge_crosser.h"
 #include "s2/s2edge_distances.h"
 #include "s2/s2edge_vector_shape.h"
 #include "s2/s2error.h"
 #include "s2/s2lax_polygon_shape.h"
+#include "s2/s2lax_polyline_shape.h"
 #include "s2/s2loop.h"
+#include "s2/s2padded_cell.h"
+#include "s2/s2point.h"
 #include "s2/s2point_vector_shape.h"
 #include "s2/s2pointutil.h"
 #include "s2/s2polygon.h"
+#include "s2/s2polyline.h"
+#include "s2/s2shape.h"
+#include "s2/s2shape_index.h"
 #include "s2/s2shapeutil_coding.h"
 #include "s2/s2shapeutil_contains_brute_force.h"
 #include "s2/s2shapeutil_testing.h"
-#include "s2/s2shapeutil_visit_crossing_edge_pairs.h"
 #include "s2/s2testing.h"
 #include "s2/s2text_format.h"
 #include "s2/thread_testing.h"
+#include "s2/util/coding/coder.h"
+#include "s2/util/math/matrix3x3.h"
 
-using absl::make_unique;
 using absl::WrapUnique;
 using s2textformat::MakePolylineOrDie;
+using std::make_unique;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -102,10 +109,10 @@ class MutableS2ShapeIndexTest : public ::testing::Test {
 
   // Verifies that removing and adding the given combination of shapes with
   // the given memory budget yields the expected vector of batches.
-  void TestBatchGenerator(
-      int num_edges_removed, const vector<int>& shape_edges_added,
-      int64 tmp_memory_budget, int shape_id_begin,
-      const vector<BatchDescriptor>& expected_batches);
+  void TestBatchGenerator(int num_edges_removed,
+                          const vector<int>& shape_edges_added,
+                          int64 tmp_memory_budget, int shape_id_begin,
+                          const vector<BatchDescriptor>& expected_batches);
 };
 
 void MutableS2ShapeIndexTest::QuadraticValidate() {
@@ -267,7 +274,7 @@ void TestIteratorMethods(const MutableS2ShapeIndex& index) {
     auto skipped = S2CellUnion::FromBeginEnd(min_cellid, cellid.range_min());
     for (S2CellId skipped_id : skipped) {
       EXPECT_FALSE(it2.Locate(skipped_id.ToPoint()));
-      EXPECT_EQ(S2ShapeIndex::DISJOINT, it2.Locate(skipped_id));
+      EXPECT_EQ(S2CellRelation::DISJOINT, it2.Locate(skipped_id));
       it2.Begin();
       it2.Seek(skipped_id);
       EXPECT_EQ(cellid, it2.id());
@@ -286,18 +293,18 @@ void TestIteratorMethods(const MutableS2ShapeIndex& index) {
     EXPECT_TRUE(it2.Locate(it.center()));
     EXPECT_EQ(cellid, it2.id());
     it2.Begin();
-    EXPECT_EQ(S2ShapeIndex::INDEXED, it2.Locate(cellid));
+    EXPECT_EQ(S2CellRelation::INDEXED, it2.Locate(cellid));
     EXPECT_EQ(cellid, it2.id());
     if (!cellid.is_face()) {
       it2.Begin();
-      EXPECT_EQ(S2ShapeIndex::SUBDIVIDED, it2.Locate(cellid.parent()));
+      EXPECT_EQ(S2CellRelation::SUBDIVIDED, it2.Locate(cellid.parent()));
       EXPECT_LE(it2.id(), cellid);
       EXPECT_GE(it2.id(), cellid.parent().range_min());
     }
     if (!cellid.is_leaf()) {
       for (int i = 0; i < 4; ++i) {
         it2.Begin();
-        EXPECT_EQ(S2ShapeIndex::INDEXED, it2.Locate(cellid.child(i)));
+        EXPECT_EQ(S2CellRelation::INDEXED, it2.Locate(cellid.child(i)));
         EXPECT_EQ(cellid, it2.id());
       }
     }
@@ -640,7 +647,7 @@ TEST_F(MutableS2ShapeIndexTest, RandomUpdates) {
 // reads.
 class LazyUpdatesTest : public s2testing::ReaderWriterTest {
  public:
-  LazyUpdatesTest() {}
+  LazyUpdatesTest() = default;
 
   void WriteOp() override {
     index_.Clear();
@@ -691,7 +698,7 @@ TEST(MutableS2ShapeIndex, MixedGeometry) {
   index.Add(make_unique<S2Loop::Shape>(&loop));
   MutableS2ShapeIndex::Iterator it(&index);
   // No geometry intersects face 1, so there should be no index cells there.
-  EXPECT_EQ(S2ShapeIndex::DISJOINT, it.Locate(S2CellId::FromFace(1)));
+  EXPECT_EQ(S2CellRelation::DISJOINT, it.Locate(S2CellId::FromFace(1)));
 }
 
 TEST_F(MutableS2ShapeIndexTest, LinearSpace) {
@@ -770,6 +777,32 @@ TEST_F(MutableS2ShapeIndexTest, LongIndexEntriesBound) {
     sum += counts[i];
   }
   EXPECT_EQ(sum, 366);
+}
+
+// Test move-construct and move-assign functionality of `S2Shape`.  It has an id
+// value which is set when it's added to an index.  So we can create two
+// `S2LaxPolygonShape`s, add them to an index, then
+TEST(MutableS2ShapeIndex, ShapeIdSwaps) {
+  MutableS2ShapeIndex index;
+  index.Add(s2textformat::MakeLaxPolylineOrDie("1:1, 2:2"));
+  index.Add(s2textformat::MakeLaxPolylineOrDie("3:3, 4:4"));
+  index.Add(s2textformat::MakeLaxPolylineOrDie("5:5, 6:6"));
+
+  S2LaxPolylineShape& a = *down_cast<S2LaxPolylineShape*>(index.shape(1));
+  S2LaxPolylineShape& b = *down_cast<S2LaxPolylineShape*>(index.shape(2));
+  EXPECT_EQ(a.id(), 1);
+  EXPECT_EQ(b.id(), 2);
+
+  // Verify move construction moves the id value.
+  S2LaxPolylineShape c(std::move(a));
+  EXPECT_EQ(c.id(), 1);
+  s2testing::ExpectEqual(c, *s2textformat::MakeLaxPolylineOrDie("3:3, 4:4"));
+
+  // Verify move assignment moves the id value.
+  S2LaxPolylineShape d;
+  d = std::move(b);
+  EXPECT_EQ(d.id(), 2);
+  s2testing::ExpectEqual(d, *s2textformat::MakeLaxPolylineOrDie("5:5, 6:6"));
 }
 
 TEST(S2Shape, user_data) {
