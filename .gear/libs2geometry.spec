@@ -9,8 +9,6 @@ URL: https://github.com/google/s2geometry
 
 Source: %name-%version.tar
 
-Patch0: %name-%version-alt-set-no-error.patch
-
 BuildRequires(pre): rpm-macros-cmake
 BuildRequires: cmake
 BuildRequires: gcc-c++
@@ -34,7 +32,6 @@ Development libraries and headers for %name.
 
 %prep
 %setup
-%patch0 -p1
 #Set correct cpp standard
 sed -i 's/CMAKE_CXX_STANDARD 11/CMAKE_CXX_STANDARD 17/' CMakeLists.txt
 
