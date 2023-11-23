@@ -1,0 +1,12 @@
+--- src/s2/util/coding/coder.h.orig	2023-11-21 00:35:54.689816432 +0700
++++ src/s2/util/coding/coder.h	2023-11-21 00:35:19.443360077 +0700
+@@ -495,7 +495,9 @@
+                 "Decoder must be trivially copy-assignable");
+   static_assert(absl::is_trivially_destructible<Decoder>::value,
+                 "Decoder must be trivially destructible");
++#pragma GCC diagnostic ignored "-Wclass-memaccess"
+   std::memset(array, 0, num_decoders * sizeof(Decoder));
++#pragma GCC diagnostic pop
+ }
+ 
+ inline unsigned char Decoder::get8() {
