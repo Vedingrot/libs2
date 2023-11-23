@@ -1,0 +1,48 @@
+diff --git a/src/s2/s2boolean_operation.cc b/src/s2/s2boolean_operation.cc
+index ef9a308..048095b 100644
+--- a/src/s2/s2boolean_operation.cc
++++ b/src/s2/s2boolean_operation.cc
+@@ -578,12 +578,12 @@ int GraphEdgeClipper::GetCrossedVertexIndex(
+   // from left to right, then B may touch A, make an excursion to the left of
+   // A, come back to A, then make an excursion to the right of A and come back
+   // to A again, like this:
+-  //
+-  //  *--B--*-\             /-*-\
+-  //           B-\       /-B     B-\      6     7     8     9
+-  //  *--A--*--A--*-A,B-*--A--*--A--*-A,B-*--A--*--A--*-A,B-*
+-  //  0     1     2     3     4     5      \-B     B-/
+-  //                                          \-*-/
++  //                                                                  //
++  //  *--B--*-\             /-*-\                                     //
++  //           B-\       /-B     B-\      6     7     8     9         //
++  //  *--A--*--A--*-A,B-*--A--*--A--*-A,B-*--A--*--A--*-A,B-*         //
++  //  0     1     2     3     4     5      \-B     B-/                //
++  //                                          \-*-/                   //
+   //
+   // (where "*" is a vertex, and "A" and "B" are edge labels).  Note that B
+   // may also follow A for one or more edges whenever they touch (e.g. between
+diff --git a/src/s2/s2edge_clipping.h b/src/s2/s2edge_clipping.h
+index 0b7ab3c..0e0788d 100644
+--- a/src/s2/s2edge_clipping.h
++++ b/src/s2/s2edge_clipping.h
+@@ -215,14 +215,14 @@ inline double InterpolateDouble(double x, double a, double b,
+ //
+ // {
+ //   # We operate in UV space so inputs are always in [-1,1].
+-//   |x|  in [0,1] /\
+-//   |a|  in [0,1] /\
+-//   |b|  in [0,1] /\
+-//   |a1| in [0,1] /\
+-//   |b1| in [0,1] /\
++//   |x|  in [0,1] /\                                          //
++//   |a|  in [0,1] /\                                          //
++//   |b|  in [0,1] /\                                          //
++//   |a1| in [0,1] /\                                          //
++//   |b1| in [0,1] /\                                          //
+ //
+ //   # b != a is asserted by the algorithm.
+-//   b-a <> 0 /\
++//   b-a <> 0 /\                                               //
+ //
+ //   # Either a <= x <= b or b <= x <= a, and we either do (x-a) or (x-b)
+ //   # depending on which endpoint is closer to x.  So the ratio (x-a)/(b-a) can
