@@ -3,7 +3,7 @@
 %define cxx_standard 17
 
 Name: libs2geometry
-Version: 0.10.0
+Version: 0.10.0.0.33.7773d
 Release: alt1
 
 Summary: Computational geometry and spatial indexing on the sphere
@@ -12,6 +12,7 @@ Group: System/Libraries
 URL: https://github.com/google/s2geometry
 
 Source: %name-%version.tar
+Patch: %name-%version-%release.patch
 
 BuildRequires(pre): rpm-macros-cmake
 BuildRequires: cmake
@@ -36,6 +37,7 @@ Development libraries and headers for %name.
 
 %prep
 %setup
+%patch -p1
 
 %build
 %cmake \
@@ -55,5 +57,5 @@ Development libraries and headers for %name.
 %_includedir/s2/
 
 %changelog
-* Wed Jul 05 2023 Alexander Burmatov <thatman@altlinux.org> 0.10.0-alt1
-- Initial build for Sisyphus.
+* Thu Nov 23 2023 Egor Shestakov <ved@altlinux.org> 0.10.0.0.33.7773d-alt1
+- Initial build.

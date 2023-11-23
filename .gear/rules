@@ -1,3 +1,4 @@
 spec: .gear/libs2geometry.spec
-tar: v@version@:.
+tar:  v0.10.0-33-g7773d51:.
+diff: v0.10.0-33-g7773d51:. . name=@name@-@version@-@release@.patch
 copy?: .gear/*.patch
