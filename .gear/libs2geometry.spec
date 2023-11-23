@@ -15,6 +15,7 @@ Source: %name-%version.tar
 Patch0: %name-%version-%release.patch
 Patch1: %name-ignore-certain-class-memaccess-warning.patch
 Patch2: %name-suppress-multiline-comment-warnings.patch
+Patch3: %name-suppress-certain-sign-compares-warnings.patch
 
 BuildRequires(pre): rpm-macros-cmake
 BuildRequires: cmake
@@ -42,6 +43,7 @@ Development libraries and headers for %name.
 %patch0 -p1
 %patch1 -p0
 %patch2 -p1
+%patch3 -p1
 
 %build
 %cmake \

@@ -1,0 +1,34 @@
+diff --git a/src/s2/encoded_uint_vector.h b/src/s2/encoded_uint_vector.h
+index c4a3732..2b2948a 100644
+--- a/src/s2/encoded_uint_vector.h
++++ b/src/s2/encoded_uint_vector.h
+@@ -140,7 +140,9 @@ template <class T>
+ inline void EncodeUintWithLength(T value, int length, Encoder* encoder) {
+   static_assert(std::is_unsigned<T>::value, "Unsupported signed integer");
+   static_assert(sizeof(T) & 0xe, "Unsupported integer length");
++#pragma GCC diagnostic ignored "-Wsign-compare"
+   S2_DCHECK(length >= 0 && length <= sizeof(T));
++#pragma GCC diagnostic pop
+   S2_DCHECK_GE(encoder->avail(), length);
+ 
+   while (--length >= 0) {
+@@ -154,7 +156,9 @@ template <class T>
+ inline T GetUintWithLength(const char* ptr, int length) {
+   static_assert(std::is_unsigned<T>::value, "Unsupported signed integer");
+   static_assert(sizeof(T) & 0xe, "Unsupported integer length");
++#pragma GCC diagnostic ignored "-Wsign-compare"
+   S2_DCHECK(length >= 0 && length <= sizeof(T));
++#pragma GCC diagnostic pop
+ 
+   // Note that the following code is faster than any of the following:
+   //
+@@ -253,7 +257,9 @@ inline size_t EncodedUintVector<T>::size() const {
+ 
+ template <class T>
+ inline T EncodedUintVector<T>::operator[](int i) const {
++#pragma GCC diagnostic ignored "-Wsign-compare"
+   S2_DCHECK(i >= 0 && i < size_);
++#pragma GCC diagnostic pop
+   return GetUintWithLength<T>(data_ + i * len_, len_);
+ }
+ 
