@@ -34,6 +34,7 @@ data.
 Summary: Development libraries and headers for %name
 Group: Development/Other
 Requires: %name = %EVR
+Requires: libstdc++-devel
 
 %description devel
 Development libraries and headers for %name.
