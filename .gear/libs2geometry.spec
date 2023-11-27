@@ -3,7 +3,7 @@
 %define cxx_standard 17
 
 Name: libs2geometry
-Version: 0.10.0.0.33.7773d
+Version: 0.10.0.0.35.fadf
 Release: alt1
 
 Summary: Computational geometry and spatial indexing on the sphere
@@ -50,6 +50,7 @@ Development libraries and headers for %name.
 %cmake \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCMAKE_CXX_EXTENSIONS=ON \
+    -DBUILD_TESTS=OFF \
     -DCMAKE_CXX_STANDARD=%cxx_standard
 
 %cmake_build
@@ -64,5 +65,5 @@ Development libraries and headers for %name.
 %_includedir/s2/
 
 %changelog
-* Thu Nov 23 2023 Egor Shestakov <ved@altlinux.org> 0.10.0.0.33.7773d-alt1
+* Thu Nov 23 2023 Egor Shestakov <ved@altlinux.org> 0.10.0.0.35.fadf-alt1
 - Initial build.
