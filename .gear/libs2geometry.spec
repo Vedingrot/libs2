@@ -2,6 +2,8 @@
 # abseil uses.
 %define cxx_standard 17
 
+%def_enable check
+
 Name: libs2geometry
 Version: 0.10.0.0.35.fadf
 Release: alt1
@@ -17,11 +19,21 @@ Patch1: %name-ignore-certain-class-memaccess-warning.patch
 Patch2: %name-suppress-multiline-comment-warnings.patch
 Patch3: %name-suppress-certain-sign-compares-warnings.patch
 
+%if_enabled check
+Patch4: %name-use-external-gtest.patch
+%endif
+
 BuildRequires(pre): rpm-macros-cmake
 BuildRequires: cmake
 BuildRequires: gcc-c++
 BuildRequires: libabseil-cpp-devel
 BuildRequires: libssl-devel
+
+%if_enabled check
+BuildRequires: libgtest-devel
+BuildRequires: libgmock-devel
+BuildRequires: ctest
+%endif
 
 %description
 This is a package for manipulating geometric shapes.  Unlike many
@@ -46,17 +58,30 @@ Development libraries and headers for %name.
 %patch2 -p1
 %patch3 -p1
 
+%if_enabled check
+%patch4 -p1
+%endif
+
 %build
 %cmake \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCMAKE_CXX_EXTENSIONS=ON \
     -DBUILD_TESTS=OFF \
+%if_enabled check
+    -DBUILD_TESTS=ON \
+%endif
     -DCMAKE_CXX_STANDARD=%cxx_standard
 
 %cmake_build
 
 %install
 %cmake_install
+
+%check
+ctest --test-dir %_cmake__builddir \
+      --output-on-failure \
+      --force-new-ctest-process \
+      %_smp_mflags
 
 %files
 %_libdir/*.so*

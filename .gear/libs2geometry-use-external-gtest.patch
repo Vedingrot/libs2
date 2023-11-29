@@ -1,0 +1,71 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7610f9c..7d9b0f0 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -193,7 +193,7 @@ add_library(s2
+             src/s2/util/math/mathutil.cc
+             src/s2/util/units/length-units.cc)
+ 
+-if (GOOGLETEST_ROOT)
++if (BUILD_TESTS)
+   add_library(s2testing STATIC
+               src/s2/s2builderutil_testing.cc
+               src/s2/s2shapeutil_testing.cc
+@@ -229,7 +229,7 @@ target_link_libraries(
+     absl::utility
+     ${CMAKE_THREAD_LIBS_INIT})
+ 
+-if (GOOGLETEST_ROOT)
++if (BUILD_TESTS)
+   target_link_libraries(
+       s2testing
+       absl::check
+@@ -421,26 +421,27 @@ install(FILES src/s2/util/units/length-units.h
+               src/s2/util/units/physical-units.h
+         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/s2/util/units")
+ 
+-if (GOOGLETEST_ROOT)
++if (BUILD_TESTS)
+   set(S2_TARGETS s2 s2testing)
+ else()
+   set(S2_TARGETS s2)
+ endif()
+ 
+-install(TARGETS ${S2_TARGETS}
++install(TARGETS s2
+         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+ 
+ if (BUILD_TESTS)
+-  if (NOT GOOGLETEST_ROOT)
+-    message(FATAL_ERROR "BUILD_TESTS requires GOOGLETEST_ROOT")
++  if (GOOGLETEST_ROOT)
++      message("GOOGLETEST_ROOT: ${GOOGLETEST_ROOT}")
++
++      add_subdirectory(${GOOGLETEST_ROOT} build_gmock)
++      include_directories(${GOOGLETEST_ROOT}/googlemock/include)
++      include_directories(${GOOGLETEST_ROOT}/googletest/include)
++  else()
++      find_package(GTest REQUIRED)
+   endif()
+-  message("GOOGLETEST_ROOT: ${GOOGLETEST_ROOT}")
+-
+-  add_subdirectory(${GOOGLETEST_ROOT}/googlemock build_gmock)
+-  include_directories(${GOOGLETEST_ROOT}/googlemock/include)
+-  include_directories(${GOOGLETEST_ROOT}/googletest/include)
+ 
+   set(S2TestFiles
+       src/s2/encoded_s2cell_id_vector_test.cc
+@@ -574,7 +575,10 @@ if (BUILD_TESTS)
+         absl::status
+         absl::strings
+         absl::synchronization
+-        gmock_main)
++        GTest::gtest
++        GTest::gtest_main
++        GTest::gmock
++        GTest::gmock_main)
+     add_test(${test} ${test})
+   endforeach()
+ endif()
