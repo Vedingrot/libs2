@@ -2,6 +2,8 @@
 # abseil uses.
 %define cxx_standard 17
 
+%define optflags_lto %nil
+
 %def_enable check
 
 Name: libs2geometry
