@@ -20,7 +20,6 @@ Patch0: %name-%version-%release.patch
 Patch1: %name-ignore-certain-class-memaccess-warning.patch
 Patch2: %name-suppress-multiline-comment-warnings.patch
 Patch3: %name-suppress-certain-sign-compares-warnings.patch
-
 %if_enabled check
 Patch4: %name-use-external-gtest.patch
 %endif
@@ -59,7 +58,6 @@ Development libraries and headers for %name.
 %patch1 -p0
 %patch2 -p1
 %patch3 -p1
-
 %if_enabled check
 %patch4 -p1
 %endif
