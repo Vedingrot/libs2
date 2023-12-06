@@ -91,4 +91,4 @@ ctest --test-dir %_cmake__builddir \
 
 %changelog
 * Thu Nov 23 2023 Egor Shestakov <ved@altlinux.org> 0.10.0.0.35.fadf-alt1
-- Initial build.
+- Initial build. (thnx thatman@ for prototype)
